@@ -91,7 +91,7 @@ fun ContactSearchContent(
         PermissionDeniedView(
             icon = Icons.Default.Person,
             title = "Contacts permission required",
-            description = "To search your contacts and identify incoming calls, Rivo needs access to your contacts.",
+            description = "To search your contacts and identify incoming calls, Omni Dailer needs access to your contacts.",
             onGrantClick = onRequestPermission
         )
         return

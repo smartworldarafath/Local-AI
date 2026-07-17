@@ -54,7 +54,7 @@ fun TopBar(navController: NavController, navigator: DestinationsNavigator) {
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "Search in Rivo",
+                    text = "Search in Omni Dailer",
                     textAlign = TextAlign.Center,
                     modifier = Modifier
                         .weight(1f)

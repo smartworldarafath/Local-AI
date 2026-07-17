@@ -115,7 +115,7 @@ fun DefaultDialerScreen(navController: NavController, navigator: DestinationsNav
                 Spacer(modifier = Modifier.height(40.dp))
 
                 Text(
-                    text = "Make Rivo your official dialer",
+                    text = "Make Omni Dailer your official dialer",
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onBackground,
@@ -125,7 +125,7 @@ fun DefaultDialerScreen(navController: NavController, navigator: DestinationsNav
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "To make and receive calls, manage your call history, and experience spam protection, Rivo needs to be set as your default phone app.",
+                    text = "To make and receive calls, manage your call history, and experience spam protection, Omni Dailer needs to be set as your default phone app.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -142,7 +142,7 @@ fun DefaultDialerScreen(navController: NavController, navigator: DestinationsNav
                             .fillMaxWidth()
                     ) {
                         Text(
-                            text = "Rivo cannot function without this permission. Please try again.",
+                            text = "Omni Dailer cannot function without this permission. Please try again.",
                             color = MaterialTheme.colorScheme.onErrorContainer,
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(16.dp),

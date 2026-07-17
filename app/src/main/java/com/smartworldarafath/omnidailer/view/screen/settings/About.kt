@@ -68,7 +68,7 @@ fun AboutScreen(navigator: DestinationsNavigator) {
             Box(contentAlignment = Alignment.Center) {
                 Image(
                     painter = painterResource(R.drawable.logo),
-                    contentDescription = "Rivo Logo",
+                    contentDescription = "Omni Dailer Logo",
                     modifier = Modifier.size(64.dp)
                 )
             }
@@ -76,7 +76,7 @@ fun AboutScreen(navigator: DestinationsNavigator) {
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "Rivo",
+                text = "Omni Dailer",
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Bold
             )
@@ -93,7 +93,7 @@ fun AboutScreen(navigator: DestinationsNavigator) {
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
                 Text(
-                    "Rivo is a modern dialer app that brings simplicity and elegance to calling. Designed with Material You, it adapts seamlessly to your theme.",
+                    "Omni Dailer is a modern dialer app that brings simplicity and elegance to calling. Designed with Material You, it adapts seamlessly to your theme.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                 )

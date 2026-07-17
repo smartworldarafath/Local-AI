@@ -394,7 +394,7 @@ fun CallLogFullContent(
         PermissionDeniedView(
             icon = Icons.Default.Call,
             title = "Call History",
-            description = "Rivo needs access to your call logs to show your recent activity and missed calls.",
+            description = "Omni Dailer needs access to your call logs to show your recent activity and missed calls.",
             onGrantClick = onRequestPermission
         )
     }

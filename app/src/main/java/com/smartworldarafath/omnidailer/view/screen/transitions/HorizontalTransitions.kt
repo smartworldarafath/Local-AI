@@ -1,61 +1,87 @@
-﻿package com.smartworldarafath.omnidailer.view.screen.transitions
+package com.smartworldarafath.omnidailer.view.screen.transitions
 
 import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.unit.IntOffset
 import androidx.navigation.NavBackStackEntry
 import com.ramcosta.composedestinations.animations.NavHostAnimatedDestinationStyle
 
 object AppTransitions : NavHostAnimatedDestinationStyle() {
-    private const val DURATION = 500
+    // Custom spring specifications for smooth slide and fade transitions
+    private val slideSpring = spring<IntOffset>(
+        dampingRatio = Spring.DampingRatioLowBouncy, // Low bounce for physics feel
+        stiffness = Spring.StiffnessMediumLow       // Slightly slower, natural motion
+    )
+    private val fadeSpring = spring<Float>(
+        dampingRatio = Spring.DampingRatioNoBouncy,
+        stiffness = Spring.StiffnessMedium
+    )
 
     override val enterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-        slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(DURATION))
+        slideInHorizontally(initialOffsetX = { it }, animationSpec = slideSpring)
     }
 
     override val exitTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-        slideOutHorizontally(targetOffsetX = { -it / 10 }, animationSpec = tween(DURATION)) + 
-        fadeOut(animationSpec = tween(DURATION), targetAlpha = 0.4f)
+        slideOutHorizontally(targetOffsetX = { -it / 10 }, animationSpec = slideSpring) + 
+        fadeOut(animationSpec = fadeSpring, targetAlpha = 0.4f)
     }
 
     override val popEnterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-        slideInHorizontally(initialOffsetX = { -it / 10 }, animationSpec = tween(DURATION)) + 
-        fadeIn(animationSpec = tween(DURATION), initialAlpha = 0.4f)
+        slideInHorizontally(initialOffsetX = { -it / 10 }, animationSpec = slideSpring) + 
+        fadeIn(animationSpec = fadeSpring, initialAlpha = 0.4f)
     }
 
     override val popExitTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-        slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(DURATION))
+        slideOutHorizontally(targetOffsetX = { it }, animationSpec = slideSpring)
     }
 }
 
 object FadeTransitions : NavHostAnimatedDestinationStyle() {
-    private const val DURATION = 400
+    private val scaleSpring = spring<Float>(
+        dampingRatio = Spring.DampingRatioLowBouncy,
+        stiffness = Spring.StiffnessMediumLow
+    )
+    private val fadeSpring = spring<Float>(
+        dampingRatio = Spring.DampingRatioNoBouncy,
+        stiffness = Spring.StiffnessMedium
+    )
+
     override val enterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-        fadeIn(animationSpec = tween(DURATION)) + scaleIn(initialScale = 0.95f, animationSpec = tween(DURATION))
+        fadeIn(animationSpec = fadeSpring) + scaleIn(initialScale = 0.95f, animationSpec = scaleSpring)
     }
     override val exitTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-        fadeOut(animationSpec = tween(DURATION))
+        fadeOut(animationSpec = fadeSpring)
     }
     override val popEnterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-        fadeIn(animationSpec = tween(DURATION))
+        fadeIn(animationSpec = fadeSpring)
     }
     override val popExitTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-        fadeOut(animationSpec = tween(DURATION)) + scaleOut(targetScale = 0.95f, animationSpec = tween(DURATION))
+        fadeOut(animationSpec = fadeSpring) + scaleOut(targetScale = 0.95f, animationSpec = scaleSpring)
     }
 }
 
 object ZoomTransitions : NavHostAnimatedDestinationStyle() {
-    private const val DURATION = 500
+    private val scaleSpring = spring<Float>(
+        dampingRatio = 0.8f,
+        stiffness = Spring.StiffnessMediumLow
+    )
+    private val fadeSpring = spring<Float>(
+        dampingRatio = Spring.DampingRatioNoBouncy,
+        stiffness = Spring.StiffnessMedium
+    )
+
     override val enterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-        scaleIn(initialScale = 0.8f, animationSpec = tween(DURATION)) + fadeIn(animationSpec = tween(DURATION))
+        scaleIn(initialScale = 0.82f, animationSpec = scaleSpring) + fadeIn(animationSpec = fadeSpring)
     }
     override val exitTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-        scaleOut(targetScale = 1.1f, animationSpec = tween(DURATION)) + fadeOut(animationSpec = tween(DURATION))
+        scaleOut(targetScale = 1.08f, animationSpec = scaleSpring) + fadeOut(animationSpec = fadeSpring)
     }
     override val popEnterTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-        scaleIn(initialScale = 1.1f, animationSpec = tween(DURATION)) + fadeIn(animationSpec = tween(DURATION))
+        scaleIn(initialScale = 1.08f, animationSpec = scaleSpring) + fadeIn(animationSpec = fadeSpring)
     }
     override val popExitTransition: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = {
-        scaleOut(targetScale = 0.8f, animationSpec = tween(DURATION)) + fadeOut(animationSpec = tween(DURATION))
+        scaleOut(targetScale = 0.82f, animationSpec = scaleSpring) + fadeOut(animationSpec = fadeSpring)
     }
 }
 
