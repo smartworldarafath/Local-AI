@@ -33,6 +33,11 @@ jobs:
           cache: 'npm'
           cache-dependency-path: web-ui/package-lock.json
 
+      - name: Install Web UI Dependencies
+        run: |
+          cd web-ui
+          npm ci
+
       - name: Decode Keystore (if available)
         run: |
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
