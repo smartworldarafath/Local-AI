@@ -13,8 +13,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    kotlinOptions {
-        jvmTarget = "11"
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
     }
 
     defaultConfig {
@@ -46,7 +46,8 @@ androidComponents {
         val artifactsLoader = v.artifacts.getBuiltArtifactsLoader()
         v.instrumentationRunnerArguments.put(
             "targetAppId",
-            v.testedApks.mapNotNull { artifactsLoader.load(it)?.applicationId }.joinToString(",")
+            v.testedApks.map { artifactsLoader.load(it)?.applicationId.orEmpty() }
         )
     }
 }
+
