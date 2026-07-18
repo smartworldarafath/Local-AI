@@ -5,8 +5,6 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(17)
-
     androidTarget()
     listOf(
         iosArm64(),
@@ -41,4 +39,10 @@ android {
     defaultConfig {
         minSdk = 26
     }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
 }
+
