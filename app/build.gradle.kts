@@ -190,13 +190,10 @@ android {
         generateLocaleConfig = true
     }
     applicationVariants.all {
-        outputs.all {
-            this as com.android.build.gradle.internal.api.ApkVariantOutputImpl
-
-            val variantName = baseName
-            val apkName = "LastChat_" + defaultConfig.versionName + "_" + variantName + ".apk"
-
-            outputFileName = apkName
+        outputs.configureEach {
+            (this as? com.android.build.gradle.internal.api.ApkVariantOutputImpl)?.let { output ->
+                output.outputFileName = "LocalAI_${defaultConfig.versionName}_${output.baseName}.apk"
+            }
         }
     }
     tasks.withType<KotlinCompile>().configureEach {
