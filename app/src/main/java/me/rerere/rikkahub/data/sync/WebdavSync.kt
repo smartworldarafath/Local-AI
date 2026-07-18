@@ -1,9 +1,9 @@
 package me.rerere.rikkahub.data.sync
 
 import android.content.Context
-import at.bitfire.dav4jvm.okhttp.DavCollection
-import at.bitfire.dav4jvm.okhttp.Response
-import at.bitfire.dav4jvm.okhttp.exception.NotFoundException
+import at.bitfire.dav4jvm.DavCollection
+import at.bitfire.dav4jvm.Response
+import at.bitfire.dav4jvm.exception.NotFoundException
 import at.bitfire.dav4jvm.property.webdav.DisplayName
 import at.bitfire.dav4jvm.property.webdav.GetContentLength
 import at.bitfire.dav4jvm.property.webdav.GetLastModified
