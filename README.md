@@ -1,49 +1,40 @@
-# Omni Dailer
+# Local AI
 
-Omni Dailer is an open-source Android dialer built with Jetpack Compose.
+**Local AI** is a feature-rich, high-performance open-source AI assistant application for Android built with Material 3 Expressive, flexible theme controls, resource management, and local multi-provider support.
 
-The goal is simple: provide a clean, modern phone app without unnecessary clutter while keeping the core calling experience fast and reliable.
+---
 
-## Installation
+## ✨ Key Features
 
-<p align="center">
-  <a href="https://github.com/smartworldarafath/Omni-Dailer/releases">
-      <img src="https://user-images.githubusercontent.com/69304392/148696068-0cfea65d-b18f-4685-82b5-329a330b1c0d.png" alt="Download from GitHub Releases" height="100">
-  </a>
-</p>
+### Material 3 Expressive & UI Customization
+* **Material 3 Expressive**: Modern Expressive design, spring physics, and fluid micro-animations across all screens.
+* **CPU & GPU Usage Control**: Preset resource limits (20%, 35%, 50%, 75%, 90%, and System Recommended) to manage hardware performance and battery usage.
+* **System & App UI Color**: Support for Android Dynamic Color, custom UI color palettes, and a instant **Default** restoration button.
+* **Theme System**: Expanded built-in themes + custom theme creator with instant application.
+* **Light Slider**: Center-default slider (-1.0 to +1.0) allowing smooth adjustment of UI lightness and color saturation.
 
-### APK Certificate Signing Key Hash
+### Advanced AI Capabilities
+* **Multi-Provider Support**: Built-in presets for OpenAI, Google Gemini, Anthropic Claude, ComfyUI, and custom OpenAI-compatible providers.
+* **RAG Memory System**: Local vector memory allowing assistants to remember context from past conversations.
+* **Multi-Modal Inputs**: Interact using Text, Images, Video, and Audio.
 
-```
-com.smartworldarafath.omnidailer
-AF:7B:C8:10:1A:C9:D7:4B:93:5B:31:4B:71:C7:EE:1D:ED:0F:9D:45:AB:07:4C:72:7F:82:11:89:F4:56:50:C5
-```
+### Tools & Integrations
+* **Workspaces & PRoot**: Embedded Linux tools & execution environment.
+* **JavaScript Engine**: QuickJS environment.
+* **Web Search**: 15 integrated web search providers.
+* **MCP**: Model Context Protocol server support.
 
-## Screenshots
+---
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/smartworldarafath/Omni-Dailer/main/images/1.png" width="260">
-  <img src="https://raw.githubusercontent.com/smartworldarafath/Omni-Dailer/main/images/2.png" width="260">
-  <img src="https://raw.githubusercontent.com/smartworldarafath/Omni-Dailer/main/images/3.png" width="260">
-  <img src="https://raw.githubusercontent.com/smartworldarafath/Omni-Dailer/main/images/4.png" width="260">
-  <img src="https://raw.githubusercontent.com/smartworldarafath/Omni-Dailer/main/images/5.png" width="260">
-  <img src="https://raw.githubusercontent.com/smartworldarafath/Omni-Dailer/main/images/6.png" width="260">
-</p>
+## 🛠️ Built With
+* **Kotlin** & **Jetpack Compose** (Material 3 Expressive)
+* **Koin** for Dependency Injection
+* **Room** & **DataStore** for persistence
+* **WorkManager** for background processing
 
-## Features
+---
 
-* **Modern Interface**: Designed using Material 3 Expressive components.
-* **T9 Search**: Fast and easy contact dialing and lookup.
-* **Call History**: Clean, organized history log.
-* **Native In-Call controls**: Seamless built-in calling view.
-* **Proximity Sensor support**: Automatic screen controls during calls.
-* **Privacy Focused**: Custom Private Contacts database.
-* **Open Source**: GNU GPL v3.0 licensed.
+## 📜 Repository & License
+* **Repository**: [smartworldarafath/Local-AI](https://github.com/smartworldarafath/Local-AI)
+* **License**: GNU General Public License v3.0 (see [LICENSE](LICENSE) for details).
 
-## Contributing
-
-Issues, feature requests, and pull requests are welcome.
-
-## License
-
-Licensed under the GNU GPL v3.0. See the LICENSE file for details.

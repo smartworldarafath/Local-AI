@@ -13,10 +13,8 @@
 @rem See the License for the specific language governing permissions and
 @rem limitations under the License.
 @rem
-@rem SPDX-License-Identifier: Apache-2.0
-@rem
 
-@if "%DEBUG%"=="" @echo off
+@if "%DEBUG%" == "" @echo off
 @rem ##########################################################################
 @rem
 @rem  Gradle startup script for Windows
@@ -27,8 +25,7 @@
 if "%OS%"=="Windows_NT" setlocal
 
 set DIRNAME=%~dp0
-if "%DIRNAME%"=="" set DIRNAME=.
-@rem This is normally unused
+if "%DIRNAME%" == "" set DIRNAME=.
 set APP_BASE_NAME=%~n0
 set APP_HOME=%DIRNAME%
 
@@ -43,50 +40,82 @@ if defined JAVA_HOME goto findJavaFromJavaHome
 
 set JAVA_EXE=java.exe
 %JAVA_EXE% -version >NUL 2>&1
-if %ERRORLEVEL% equ 0 goto execute
+if "%ERRORLEVEL%" == "0" goto execute
 
-echo. 1>&2
-echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH. 1>&2
-echo. 1>&2
-echo Please set the JAVA_HOME variable in your environment to match the 1>&2
-echo location of your Java installation. 1>&2
+echo.
+echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.
+echo.
+echo Please set the JAVA_HOME variable in your environment to match the
+echo location of your Java installation.
 
 goto fail
 
 :findJavaFromJavaHome
 set JAVA_HOME=%JAVA_HOME:"=%
-set JAVA_EXE=%JAVA_HOME%/bin/java.exe
+set JAVA_EXE=%JAVA_HOME%\bin\java.exe
 
+if not exist "%JAVA_EXE%" goto findJavaFallback
+
+@rem Gradle/Kotlin in this repository currently fails on JDK 25+ during script evaluation.
+@rem If JAVA_HOME points to 25+, try a local JDK 21 fallback.
+set JAVA_VERSION_RAW=
+for /f "usebackq tokens=3" %%v in (`""%JAVA_EXE%" -version 2>&1 | findstr /i "version""`) do set JAVA_VERSION_RAW=%%~v
+if not defined JAVA_VERSION_RAW goto checkFallbackDone
+set JAVA_VERSION_RAW=%JAVA_VERSION_RAW:"=%
+for /f "tokens=1 delims=." %%m in ("%JAVA_VERSION_RAW%") do set JAVA_VERSION_MAJOR=%%m
+if not "%JAVA_VERSION_MAJOR%"=="25" goto checkFallbackDone
+
+:findJavaFallback
+set JDK21_FOUND=
+if defined JAVA21_HOME if exist "%JAVA21_HOME%\bin\java.exe" set JDK21_FOUND=1
+if defined JDK21_FOUND (
+    set JAVA_HOME=%JAVA21_HOME%
+    set JAVA_EXE=%JAVA_HOME%\bin\java.exe
+    goto checkFallbackDone
+)
+if exist "%USERPROFILE%\.local\share\mise\installs\java\21.0.2\bin\java.exe" (
+    set JAVA_HOME=%USERPROFILE%\.local\share\mise\installs\java\21.0.2
+    set JAVA_EXE=%JAVA_HOME%\bin\java.exe
+    goto checkFallbackDone
+)
+if exist "%USERPROFILE%\.gradle\jdks" (
+    for /r "%USERPROFILE%\.gradle\jdks" %%i in (java.exe) do (
+        if exist "%%i" (
+            set "JAVA_EXE=%%i"
+            for %%j in ("%%~dpi..") do set "JAVA_HOME=%%~fj"
+        )
+    )
+)
+
+:checkFallbackDone
 if exist "%JAVA_EXE%" goto execute
 
-echo. 1>&2
-echo ERROR: JAVA_HOME is set to an invalid directory: %JAVA_HOME% 1>&2
-echo. 1>&2
-echo Please set the JAVA_HOME variable in your environment to match the 1>&2
-echo location of your Java installation. 1>&2
+echo.
+echo ERROR: JAVA_HOME is set to an invalid directory: %JAVA_HOME%
+echo.
+echo Please set the JAVA_HOME variable in your environment to match the
+echo location of your Java installation.
 
 goto fail
 
 :execute
 @rem Setup the command line
 
-set CLASSPATH=
+set CLASSPATH=%APP_HOME%\gradle\wrapper\gradle-wrapper.jar
 
 
 @rem Execute Gradle
-"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" -jar "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar" %*
+"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %*
 
 :end
 @rem End local scope for the variables with windows NT shell
-if %ERRORLEVEL% equ 0 goto mainEnd
+if "%ERRORLEVEL%"=="0" goto mainEnd
 
 :fail
 rem Set variable GRADLE_EXIT_CONSOLE if you need the _script_ return code instead of
 rem the _cmd.exe /c_ return code!
-set EXIT_CODE=%ERRORLEVEL%
-if %EXIT_CODE% equ 0 set EXIT_CODE=1
-if not ""=="%GRADLE_EXIT_CONSOLE%" exit %EXIT_CODE%
-exit /b %EXIT_CODE%
+if  not "" == "%GRADLE_EXIT_CONSOLE%" exit 1
+exit /b 1
 
 :mainEnd
 if "%OS%"=="Windows_NT" endlocal

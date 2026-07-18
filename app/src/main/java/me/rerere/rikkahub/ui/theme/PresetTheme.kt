@@ -1,0 +1,64 @@
+package me.rerere.rikkahub.ui.theme
+
+import androidx.compose.material3.ColorScheme
+import androidx.compose.runtime.Composable
+import me.rerere.rikkahub.ui.theme.presets.AutumnThemePreset
+import me.rerere.rikkahub.ui.theme.presets.BlackThemePreset
+import me.rerere.rikkahub.ui.theme.presets.OceanThemePreset
+import me.rerere.rikkahub.ui.theme.presets.SakuraThemePreset
+import me.rerere.rikkahub.ui.theme.presets.SeafoamMintThemePreset
+import me.rerere.rikkahub.ui.theme.presets.SpringThemePreset
+
+const val SeafoamMintThemeId = "seafoam_mint"
+
+private const val LegacyNightskyBlueThemeId = "nightsky_blue"
+
+data class PresetTheme(
+    val id: String,
+    val name: @Composable () -> Unit,
+    val standardLight: ColorScheme,
+    val standardDark: ColorScheme,
+) {
+    fun getColorScheme(dark: Boolean): ColorScheme {
+        return if (dark) standardDark else standardLight
+    }
+}
+
+val PresetThemes by lazy {
+    listOf(
+        SeafoamMintThemePreset,
+        OceanThemePreset,
+        SakuraThemePreset,
+        SpringThemePreset,
+        AutumnThemePreset,
+        BlackThemePreset,
+    )
+}
+
+fun normalizePresetThemeId(id: String): String {
+    return when (id) {
+        LegacyNightskyBlueThemeId -> SeafoamMintThemeId
+        else -> id
+    }
+}
+
+fun findPresetTheme(id: String, customThemes: List<me.rerere.rikkahub.data.datastore.CustomThemeData> = emptyList()): PresetTheme {
+    val normalizedId = normalizePresetThemeId(id)
+    val preset = PresetThemes.find { it.id == normalizedId }
+    if (preset != null) return preset
+
+    val custom = customThemes.find { it.id == id }
+    if (custom != null) {
+        val lightScheme = createColorSchemeFromHex(custom.primaryColorHex, dark = false)
+        val darkScheme = createColorSchemeFromHex(custom.primaryColorHex, dark = true)
+        return PresetTheme(
+            id = custom.id,
+            name = { androidx.compose.material3.Text(custom.name) },
+            standardLight = lightScheme,
+            standardDark = darkScheme,
+        )
+    }
+
+    return SeafoamMintThemePreset
+}
+
