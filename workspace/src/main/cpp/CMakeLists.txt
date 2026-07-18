@@ -32,13 +32,16 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
 add_library(termux SHARED
         termux_pty.cpp)
 
-# Specifies libraries CMake should link to your target library. You
-# can link libraries from various origins, such as libraries defined in this
-# build script, prebuilt third-party libraries, or Android system libraries.
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 target_link_libraries(${CMAKE_PROJECT_NAME}
         # List libraries link to the target library
         android
-        log)
+        log
+        c++_shared)
 
 target_link_libraries(termux
-        log)
+        log
+        c++_shared)
+
