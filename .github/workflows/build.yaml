@@ -33,26 +33,33 @@ jobs:
           cache: 'npm'
           cache-dependency-path: web-ui/package-lock.json
 
-      - name: Decode Keystore
+      - name: Decode Keystore (if available)
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/keystore.jks
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/keystore.jks
+          else
+            echo "No keystore secret found, will use debug signing"
+          fi
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
-      - name: Build Release APK & AAB
+      - name: Build APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          KEYSTORE_PATH: ../app/keystore.jks # Adjusted path for gradle context
         run: |
-          ./gradlew assembleRelease bundleRelease
+          if [ -f "app/keystore.jks" ]; then
+            ./gradlew assembleRelease bundleRelease
+          else
+            ./gradlew assembleDebug
+          fi
 
       - name: Collect outputs
         run: |
           mkdir outputs
-          find . -type f \( -name "*.apk" -o -name "*.aab" \) -path "*/release/*" -exec cp {} outputs/ \;
+          find . -type f \( -name "*.apk" -o -name "*.aab" \) \( -path "*/release/*" -o -path "*/debug/*" \) -exec cp {} outputs/ \;
 
       - name: Extract Signing Certificate Fingerprint
         run: |
