@@ -307,6 +307,7 @@ class RouteActivity : ComponentActivity() {
             enableEdgeToEdge()
             androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
             disableNavigationBarContrast()
+            setupHighRefreshRate()
 
             super.onCreate(savedInstanceState)
             lifecycleScope.launch {
@@ -534,6 +535,32 @@ class RouteActivity : ComponentActivity() {
                 )
             },
         )
+    }
+
+    private fun setupHighRefreshRate() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            runCatching {
+                @Suppress("DEPRECATION")
+                val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    this.display
+                } else {
+                    windowManager.defaultDisplay
+                }
+                val modes = display?.supportedModes ?: emptyArray()
+                val maxMode = modes.maxByOrNull { it.refreshRate }
+                val maxRate = maxMode?.refreshRate ?: 120f
+
+                val lp = window.attributes
+                if (maxMode != null) {
+                    lp.preferredDisplayModeId = maxMode.modeId
+                }
+                @Suppress("DEPRECATION")
+                lp.preferredRefreshRate = maxRate
+                window.attributes = lp
+            }.onFailure {
+                android.util.Log.w(TAG, "Failed to set high refresh rate: ${it.message}")
+            }
+        }
     }
 
     @Composable

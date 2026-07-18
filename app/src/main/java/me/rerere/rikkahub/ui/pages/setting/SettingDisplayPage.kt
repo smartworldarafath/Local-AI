@@ -129,35 +129,71 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
             contentPadding = contentPadding,
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
-            // CPU & GPU Usage Control
+            // CPU & GPU Performance Control
             item {
+                val haptics = me.rerere.rikkahub.ui.hooks.rememberPremiumHaptics()
                 SettingsGroup(
-                    title = "CPU & GPU Usage Control"
+                    title = "Hardware Performance & Resource Control"
                 ) {
-                    SettingGroupItem(
-                        title = "Resource Usage Limit",
-                        subtitle = "Control maximum CPU and GPU usage allowed for local processing",
-                        trailing = {
-                            Select(
-                                options = me.rerere.rikkahub.data.datastore.ResourceLimitPreset.entries.toList(),
-                                selectedOption = settings.resourceLimitPreset,
-                                onOptionSelected = { preset ->
-                                    vm.updateSettings(settings.copy(resourceLimitPreset = preset))
-                                },
-                                optionToString = { preset ->
-                                    when (preset) {
-                                        me.rerere.rikkahub.data.datastore.ResourceLimitPreset.SYSTEM_RECOMMENDED -> "System Recommended / Current Usage"
-                                        me.rerere.rikkahub.data.datastore.ResourceLimitPreset.P20 -> "20%"
-                                        me.rerere.rikkahub.data.datastore.ResourceLimitPreset.P35 -> "35%"
-                                        me.rerere.rikkahub.data.datastore.ResourceLimitPreset.P50 -> "50%"
-                                        me.rerere.rikkahub.data.datastore.ResourceLimitPreset.P75 -> "75%"
-                                        me.rerere.rikkahub.data.datastore.ResourceLimitPreset.P90 -> "90%"
-                                    }
-                                },
-                                modifier = Modifier.wrapContentWidth()
-                            )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        Text(
+                            text = "CPU & GPU Usage Allocation",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Max hardware resource limit allowed for local AI background tasks",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val presets = me.rerere.rikkahub.data.datastore.ResourceLimitPreset.entries
+                            presets.forEach { preset ->
+                                val isSelected = settings.resourceLimitPreset == preset
+                                val label = when (preset) {
+                                    me.rerere.rikkahub.data.datastore.ResourceLimitPreset.SYSTEM_RECOMMENDED -> "Auto"
+                                    me.rerere.rikkahub.data.datastore.ResourceLimitPreset.P20 -> "20%"
+                                    me.rerere.rikkahub.data.datastore.ResourceLimitPreset.P35 -> "35%"
+                                    me.rerere.rikkahub.data.datastore.ResourceLimitPreset.P50 -> "50%"
+                                    me.rerere.rikkahub.data.datastore.ResourceLimitPreset.P75 -> "75%"
+                                    me.rerere.rikkahub.data.datastore.ResourceLimitPreset.P90 -> "90%"
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(me.rerere.rikkahub.ui.theme.AppShapes.Chip)
+                                        .background(
+                                            if (isSelected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.surfaceContainerHigh
+                                        )
+                                        .clickable {
+                                            haptics.perform(me.rerere.rikkahub.ui.hooks.HapticPattern.Pop)
+                                            vm.updateSettings(settings.copy(resourceLimitPreset = preset))
+                                        }
+                                        .padding(vertical = 10.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
                         }
-                    )
+                    }
                 }
             }
 
