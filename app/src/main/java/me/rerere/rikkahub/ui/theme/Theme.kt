@@ -57,7 +57,7 @@ fun RikkahubTheme(
 
     val colorScheme = when {
         !settings.customAppUiColorHex.isNullOrBlank() -> {
-            createColorSchemeFromHex(settings.customAppUiColorHex, dark = darkTheme)
+            createColorSchemeFromHex(settings.customAppUiColorHex!!, dark = darkTheme)
         }
         settings.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
