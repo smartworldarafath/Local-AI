@@ -3,8 +3,8 @@ package me.rerere.rikkahub.di
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
-import at.bitfire.dav4jvm.okhttp.BasicDigestAuthHandler
-import at.bitfire.dav4jvm.okhttp.DavCollection
+import at.bitfire.dav4jvm.BasicDigestAuthHandler
+import at.bitfire.dav4jvm.DavCollection
 import coil3.ImageLoader
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
@@ -286,11 +286,12 @@ val dataSourceModule = module {
                 }
             }
 
+
             private fun WebDavConfig.createWebDavClient(): OkHttpClient {
                 val authHandler = BasicDigestAuthHandler(
                     domain = null,
                     username = username,
-                    password = password.toCharArray(),
+                    password = password,
                 )
                 return OkHttpClient.Builder()
                     .followRedirects(false)

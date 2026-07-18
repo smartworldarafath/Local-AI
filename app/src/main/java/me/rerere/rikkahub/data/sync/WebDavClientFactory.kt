@@ -1,6 +1,6 @@
 package me.rerere.rikkahub.data.sync
 
-import at.bitfire.dav4jvm.okhttp.DavCollection
+import at.bitfire.dav4jvm.DavCollection
 import java.io.File
 import me.rerere.rikkahub.data.datastore.WebDavConfig
 

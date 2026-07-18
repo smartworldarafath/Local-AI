@@ -1,12 +1,12 @@
 package me.rerere.rikkahub.data.sync
 
 import android.content.Context
-import at.bitfire.dav4jvm.okhttp.DavCollection
-import at.bitfire.dav4jvm.okhttp.Response
-import at.bitfire.dav4jvm.okhttp.exception.NotFoundException
-import at.bitfire.dav4jvm.property.webdav.DisplayName
-import at.bitfire.dav4jvm.property.webdav.GetContentLength
-import at.bitfire.dav4jvm.property.webdav.GetLastModified
+import at.bitfire.dav4jvm.DavCollection
+import at.bitfire.dav4jvm.Response
+import at.bitfire.dav4jvm.exception.NotFoundException
+import at.bitfire.dav4jvm.property.DisplayName
+import at.bitfire.dav4jvm.property.GetContentLength
+import at.bitfire.dav4jvm.property.GetLastModified
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -65,18 +65,18 @@ class WebdavSync(
             collection.propfind(depth = 1) { response, relation ->
                 LogUtil.i(TAG, "listBackupFiles: ${response.properties} ${response.href}")
                 if (relation == Response.HrefRelation.MEMBER) {
-                    val displayName = response.properties.filterIsInstance<DisplayName>()
+                    val displayName = response.properties.filterIsInstance(DisplayName::class.java)
                         .firstOrNull()?.displayName ?: "Unknown"
-                    val size = response.properties.filterIsInstance<GetContentLength>()
+                    val size = response.properties.filterIsInstance(GetContentLength::class.java)
                         .firstOrNull()?.contentLength ?: 0L
-                    val lastModified = response.properties.filterIsInstance<GetLastModified>()
-                        .firstOrNull()?.lastModified ?: Instant.EPOCH
+                    val lastModifiedMs = response.properties.filterIsInstance(GetLastModified::class.java)
+                        .firstOrNull()?.lastModified ?: 0L
                     files.add(
                         WebDavBackupItem(
                             href = response.href.toString(),
                             displayName = displayName,
                             size = size,
-                            lastModified = lastModified,
+                            lastModified = Instant.ofEpochMilli(lastModifiedMs),
                         )
                     )
                 }
@@ -95,24 +95,18 @@ class WebdavSync(
         }
 
         collection.get(
-            accept = "",
+            accept = "*/*",
             headers = null,
         ) { response ->
             if (response.isSuccessful) {
-                LogUtil.i(
-                    TAG,
-                    "restoreFromWebDav: Downloading ${item.displayName} to ${backupFile.absolutePath}",
-                )
+                LogUtil.i(TAG, "restoreFromWebDav: Downloading ${item.displayName} to ${backupFile.absolutePath}")
                 response.body?.byteStream()?.use { inputStream ->
                     backupFile.sink().buffer().outputStream().use { outputStream ->
                         inputStream.copyTo(outputStream)
                     }
                 }
             } else {
-                LogUtil.e(
-                    TAG,
-                    "restoreFromWebDav: Failed to download ${item.displayName}, response: $response",
-                )
+                LogUtil.e(TAG, "restoreFromWebDav: Failed to download ${item.displayName}, response: $response")
                 throw Exception("Failed to download backup file: ${response.message}")
             }
         }
@@ -132,8 +126,8 @@ class WebdavSync(
     suspend fun deleteWebDavBackupFile(webDavConfig: WebDavConfig, item: WebDavBackupItem) =
         withContext(Dispatchers.IO) {
             val collection = webDavClientFactory.hrefCollection(webDavConfig, item.href)
-            collection.delete { response ->
-                LogUtil.i(TAG, "deleteWebDavBackupFile: $response")
+            collection.delete { _ ->
+                LogUtil.i(TAG, "deleteWebDavBackupFile: deleted ${item.href}")
             }
         }
 

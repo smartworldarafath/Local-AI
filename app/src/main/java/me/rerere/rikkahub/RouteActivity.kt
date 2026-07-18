@@ -307,12 +307,7 @@ class RouteActivity : ComponentActivity() {
             enableEdgeToEdge()
             androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
             disableNavigationBarContrast()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                runCatching {
-                    window.preferredDisplayModeId = window.display?.supportedModes
-                        ?.maxByOrNull { it.refreshRate }?.modeId ?: 0
-                }
-            }
+
             super.onCreate(savedInstanceState)
             lifecycleScope.launch {
                 hasSuccessfulReplyBeforeSetup = withContext(Dispatchers.IO) {
