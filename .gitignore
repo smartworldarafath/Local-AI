@@ -25,3 +25,6 @@ __pycache__/
 *.jks
 *.keystore
 Thumbs.db
+
+dav4jvm-sources/
+dav4jvm-sources.zip
