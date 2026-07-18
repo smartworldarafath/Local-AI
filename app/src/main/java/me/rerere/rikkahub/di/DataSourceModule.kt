@@ -3,8 +3,8 @@ package me.rerere.rikkahub.di
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
-import at.bitfire.dav4jvm.BasicDigestAuthHandler
-import at.bitfire.dav4jvm.DavCollection
+import at.bitfire.dav4jvm.okhttp.BasicDigestAuthHandler
+import at.bitfire.dav4jvm.okhttp.DavCollection
 import coil3.ImageLoader
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
