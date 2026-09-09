@@ -79,6 +79,7 @@ import me.rerere.rikkahub.ui.pages.imggen.ImageGenPage
 import me.rerere.rikkahub.ui.pages.menu.MenuPage
 import me.rerere.rikkahub.ui.pages.onboarding.OnboardingPage
 import me.rerere.rikkahub.ui.pages.setting.SettingAboutPage
+import me.rerere.rikkahub.ui.pages.setting.SettingAppUpdatePage
 import me.rerere.rikkahub.ui.pages.setting.SettingChatStoragePage
 import me.rerere.rikkahub.ui.pages.setting.SettingDisplayPage
 
@@ -1007,6 +1008,12 @@ class RouteActivity : ComponentActivity() {
                         }
                     }
 
+                    composable<Screen.SettingAppUpdate> {
+                        AdaptiveSettingsScaffold(selected = SettingsDestination.AppUpdate) {
+                            SettingAppUpdatePage()
+                        }
+                    }
+
                     composable<Screen.SettingChatStorage> {
                         AdaptiveSettingsScaffold(selected = SettingsDestination.ChatStorage) {
                             SettingChatStoragePage()
@@ -1374,6 +1381,9 @@ sealed interface Screen {
 
     @Serializable
     data object SettingAbout : Screen
+
+    @Serializable
+    data object SettingAppUpdate : Screen
 
     @Serializable
     data object SettingChatStorage : Screen

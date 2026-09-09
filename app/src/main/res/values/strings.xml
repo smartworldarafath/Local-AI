@@ -629,6 +629,8 @@
     <string name="setting_page_config_api_title">Please configure API</string>
     <string name="setting_page_data_backup">Data Management</string>
     <string name="setting_page_data_backup_desc">Backup and restore app data</string>
+    <string name="setting_page_app_updates">App updates</string>
+    <string name="setting_page_app_updates_desc">Check and download latest app versions</string>
     <string name="setting_page_data_settings">Data Settings</string>
     <string name="setting_page_default_model">Default Models</string>
     <string name="setting_page_default_model_desc">Choose default models</string>

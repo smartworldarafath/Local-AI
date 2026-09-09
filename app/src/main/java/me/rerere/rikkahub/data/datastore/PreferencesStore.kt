@@ -77,6 +77,8 @@ class SettingsStore(
         val SETUP_COMPLETED = booleanPreferencesKey("setup_completed")
         val THEME_ID = stringPreferencesKey("theme_id")
         val RESOURCE_LIMIT_PRESET = stringPreferencesKey("resource_limit_preset")
+        val CPU_LIMIT_PERCENTAGE = intPreferencesKey("cpu_limit_percentage")
+        val GPU_LIMIT_PERCENTAGE = intPreferencesKey("gpu_limit_percentage")
         val CUSTOM_THEMES = stringPreferencesKey("custom_themes")
         val CUSTOM_APP_UI_COLOR = stringPreferencesKey("custom_app_ui_color")
         val LIGHT_SLIDER_VALUE = stringPreferencesKey("light_slider_value")
@@ -228,6 +230,8 @@ class SettingsStore(
                     dynamicColor = preferences[DYNAMIC_COLOR] != false,
                     themeId = preferences[THEME_ID] ?: PresetThemes[0].id,
                     resourceLimitPreset = preferences[RESOURCE_LIMIT_PRESET]?.let { runCatching { ResourceLimitPreset.valueOf(it) }.getOrNull() } ?: ResourceLimitPreset.SYSTEM_RECOMMENDED,
+                    cpuLimitPercentage = preferences[CPU_LIMIT_PERCENTAGE] ?: 70,
+                    gpuLimitPercentage = preferences[GPU_LIMIT_PERCENTAGE] ?: 70,
                     customThemes = preferences[CUSTOM_THEMES]?.let { runCatching { JsonInstant.decodeFromString<List<CustomThemeData>>(it) }.getOrNull() } ?: emptyList(),
                     customAppUiColorHex = preferences[CUSTOM_APP_UI_COLOR],
                     lightSliderValue = preferences[LIGHT_SLIDER_VALUE]?.toFloatOrNull() ?: 0.0f,
@@ -519,6 +523,8 @@ class SettingsStore(
             preferences[SETUP_COMPLETED] = normalizedSettings.setupCompleted
             preferences[THEME_ID] = normalizedSettings.themeId
             preferences[RESOURCE_LIMIT_PRESET] = normalizedSettings.resourceLimitPreset.name
+            preferences[CPU_LIMIT_PERCENTAGE] = normalizedSettings.cpuLimitPercentage
+            preferences[GPU_LIMIT_PERCENTAGE] = normalizedSettings.gpuLimitPercentage
             preferences[CUSTOM_THEMES] = JsonInstant.encodeToString(normalizedSettings.customThemes)
             normalizedSettings.customAppUiColorHex?.let { preferences[CUSTOM_APP_UI_COLOR] = it } ?: preferences.remove(CUSTOM_APP_UI_COLOR)
             preferences[LIGHT_SLIDER_VALUE] = normalizedSettings.lightSliderValue.toString()

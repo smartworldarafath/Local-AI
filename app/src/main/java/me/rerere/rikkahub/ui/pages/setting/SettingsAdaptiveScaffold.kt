@@ -53,6 +53,7 @@ import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -121,6 +122,7 @@ enum class SettingsDestination {
     Lorebooks,
     Skills,
     About,
+    AppUpdate,
     Fonts,
     UiCustomization,
     RpOptimizations,
@@ -712,6 +714,7 @@ private fun settingsPaneGroups(): List<SettingsPaneGroup> {
             titleRes = R.string.setting_page_about,
             entries = listOf(
                 SettingsPaneEntry(SettingsDestination.About, R.string.setting_page_about, null, Icons.Rounded.Info, Screen.SettingAbout),
+                SettingsPaneEntry(SettingsDestination.AppUpdate, R.string.setting_page_app_updates, null, Icons.Rounded.SystemUpdate, Screen.SettingAppUpdate),
             )
         ),
     )

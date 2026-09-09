@@ -66,6 +66,8 @@ data class Settings(
     val dynamicColor: Boolean = true,
     val themeId: String = PresetThemes[0].id,
     val resourceLimitPreset: ResourceLimitPreset = ResourceLimitPreset.SYSTEM_RECOMMENDED,
+    val cpuLimitPercentage: Int = 70,
+    val gpuLimitPercentage: Int = 70,
     val customThemes: List<CustomThemeData> = emptyList(),
     val customAppUiColorHex: String? = null,
     val lightSliderValue: Float = 0.0f,
