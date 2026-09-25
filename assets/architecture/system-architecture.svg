@@ -1,0 +1,251 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 1300" width="1560" height="1300" role="img" aria-label="Local AI system architecture">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f5f8fb"/>
+    </linearGradient>
+    <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arwAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0d9488"/>
+    </marker>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <style>
+      .t{font-family:'Segoe UI',Inter,Roboto,Helvetica,Arial,sans-serif;fill:#0f172a}
+      .ttl{font-size:30px;font-weight:700}
+      .sub{font-size:14.5px;fill:#64748b}
+      .bl{font-size:12.5px;font-weight:700;letter-spacing:.07em;fill:#0f172a}
+      .nt{font-size:13px;font-weight:600;fill:#0f172a}
+      .nb{font-size:11px;fill:#475569}
+      .ar{stroke:#94a3b8;stroke-width:2;fill:none}
+      .arc{stroke:#0d9488;stroke-width:2.2;fill:none}
+      .lg{font-size:11px;fill:#475569}
+    </style>
+  </defs>
+
+  <rect width="1560" height="1300" fill="url(#bg)"/>
+  <text class="t ttl" x="40" y="52">Local AI — System Architecture</text>
+  <text class="t sub" x="40" y="78">One Android process: a Material 3 Compose app, an AI orchestration core, an embedded Ktor web server and a PRoot Linux sandbox for tool use.</text>
+
+  <g filter="url(#sh)">
+    <rect x="40" y="110" width="940" height="168" rx="16" fill="#ffffff" stroke="#e2e8f0"/>
+    <rect x="56" y="128" width="4" height="20" rx="2" fill="#0d9488"/>
+    <text class="t bl" x="70" y="144">1 · PRESENTATION — ANDROID (JETPACK COMPOSE, MATERIAL 3 EXPRESSIVE)</text>
+    <rect x="64" y="150" width="211" height="110" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t nt" x="78" y="176">RouteActivity</text>
+    <text class="t nb" x="78" y="196">single Compose host</text>
+    <text class="t nb" x="78" y="212">type-safe Nav2 routes</text>
+    <rect x="291" y="150" width="211" height="110" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t nt" x="305" y="176">Chat screens</text>
+    <text class="t nb" x="305" y="196">streaming Markdown, LaTeX,</text>
+    <text class="t nb" x="305" y="212">tables, message branching</text>
+    <rect x="518" y="150" width="211" height="110" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t nt" x="532" y="176">Theme engine</text>
+    <text class="t nb" x="532" y="196">M3 Expressive, 6 presets,</text>
+    <text class="t nb" x="532" y="212">CPU / GPU usage limits</text>
+    <rect x="745" y="150" width="211" height="110" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t nt" x="759" y="176">Widgets, share, selection</text>
+    <text class="t nb" x="759" y="196">Glance widget, trampoline</text>
+    <text class="t nb" x="759" y="212">activities, text actions</text>
+  </g>
+  <path class="ar" d="M510,278 V298" marker-end="url(#arw)"/>
+
+  <g filter="url(#sh)">
+    <rect x="40" y="302" width="940" height="146" rx="16" fill="#ffffff" stroke="#e2e8f0"/>
+    <rect x="56" y="320" width="4" height="20" rx="2" fill="#3b82f6"/>
+    <text class="t bl" x="70" y="336">2 · STATE &amp; LIFECYCLE (KOIN SINGLETONS)</text>
+    <rect x="64" y="340" width="286" height="92" rx="12" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text class="t nt" x="78" y="366">ChatService</text>
+    <text class="t nb" x="78" y="386">conversation StateFlows, ref counting,</text>
+    <text class="t nb" x="78" y="402">generation jobs, persistence modes</text>
+    <rect x="367" y="340" width="286" height="92" rx="12" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text class="t nt" x="381" y="366">ViewModels</text>
+    <text class="t nb" x="381" y="386">StateFlow + stateIn(WhileSubscribed 5s)</text>
+    <text class="t nb" x="381" y="402">registered in ViewModelModule</text>
+    <rect x="670" y="340" width="286" height="92" rx="12" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text class="t nt" x="684" y="366">WorkManager workers</text>
+    <text class="t nb" x="684" y="386">memory consolidation, scheduled message,</text>
+    <text class="t nb" x="684" y="402">spontaneous message, storage maintenance</text>
+  </g>
+  <path class="ar" d="M510,448 V468" marker-end="url(#arw)"/>
+
+  <g filter="url(#sh)">
+    <rect x="40" y="472" width="940" height="186" rx="16" fill="#ffffff" stroke="#e2e8f0"/>
+    <rect x="56" y="490" width="4" height="20" rx="2" fill="#8b5cf6"/>
+    <text class="t bl" x="70" y="506">3 · AI ORCHESTRATION — data/ai (GenerationHandler + transformers)</text>
+    <rect x="64" y="510" width="211" height="130" rx="12" fill="#f5f3ff" stroke="#ddd6fe"/>
+    <text class="t nt" x="78" y="536">GenerationHandler</text>
+    <text class="t nb" x="78" y="556">agent loop, up to 256</text>
+    <text class="t nb" x="78" y="572">tool-use steps</text>
+    <text class="t nb" x="78" y="590">buildMessages() assembles</text>
+    <text class="t nb" x="78" y="606">the whole request</text>
+    <rect x="291" y="510" width="211" height="130" rx="12" fill="#f5f3ff" stroke="#ddd6fe"/>
+    <text class="t nt" x="305" y="536">Transformers</text>
+    <text class="t nb" x="305" y="556">input + output pipeline</text>
+    <text class="t nb" x="305" y="572">Pebble templates, OCR,</text>
+    <text class="t nb" x="305" y="590">documents as prompt,</text>
+    <text class="t nb" x="305" y="606">think tags, regex rewrite</text>
+    <rect x="518" y="510" width="211" height="130" rx="12" fill="#f5f3ff" stroke="#ddd6fe"/>
+    <text class="t nt" x="532" y="536">MemorySearchService</text>
+    <text class="t nb" x="532" y="556">search_memory tool and</text>
+    <text class="t nb" x="532" y="572">episodic recall over the</text>
+    <text class="t nb" x="532" y="590">local vector store;</text>
+    <text class="t nb" x="532" y="606">memory prompt builder</text>
+    <rect x="745" y="510" width="211" height="130" rx="12" fill="#f5f3ff" stroke="#ddd6fe"/>
+    <text class="t nt" x="759" y="536">Tool resolution</text>
+    <text class="t nb" x="759" y="556">LocalTools + WorkspaceTools</text>
+    <text class="t nb" x="759" y="572">+ MCP tools + manage_skills</text>
+    <text class="t nb" x="759" y="590">+ ask_user, gated by the</text>
+    <text class="t nb" x="759" y="606">per-tool approval map</text>
+  </g>
+  <path class="ar" d="M510,658 V678" marker-end="url(#arw)"/>
+
+  <g filter="url(#sh)">
+    <rect x="40" y="682" width="940" height="176" rx="16" fill="#ffffff" stroke="#e2e8f0"/>
+    <rect x="56" y="700" width="4" height="20" rx="2" fill="#f59e0b"/>
+    <text class="t bl" x="70" y="716">4 · CAPABILITY MODULES (SEPARATE GRADLE LIBRARIES)</text>
+    <rect x="64" y="730" width="211" height="58" rx="12" fill="#fffbeb" stroke="#fde68a"/>
+    <text class="t nt" x="78" y="754">:ai</text>
+    <text class="t nb" x="78" y="774">OpenAI, Google, Claude, ComfyUI</text>
+    <rect x="291" y="730" width="211" height="58" rx="12" fill="#fffbeb" stroke="#fde68a"/>
+    <text class="t nt" x="305" y="754">:search</text>
+    <text class="t nb" x="305" y="774">15 web-search providers</text>
+    <rect x="518" y="730" width="211" height="58" rx="12" fill="#fffbeb" stroke="#fde68a"/>
+    <text class="t nt" x="532" y="754">:tts</text>
+    <text class="t nb" x="532" y="774">9 TTS providers + Media3</text>
+    <rect x="745" y="730" width="211" height="58" rx="12" fill="#fffbeb" stroke="#fde68a"/>
+    <text class="t nt" x="759" y="754">:speech</text>
+    <text class="t nb" x="759" y="774">6 ASR / realtime voice engines</text>
+    <rect x="64" y="802" width="211" height="58" rx="12" fill="#fffbeb" stroke="#fde68a"/>
+    <text class="t nt" x="78" y="826">:highlight</text>
+    <text class="t nb" x="78" y="846">QuickJS + PrismJS highlighting</text>
+    <rect x="291" y="802" width="211" height="58" rx="12" fill="#fffbeb" stroke="#fde68a"/>
+    <text class="t nt" x="305" y="826">:document</text>
+    <text class="t nb" x="305" y="846">MuPDF PDF + DOCX to Markdown</text>
+    <rect x="518" y="802" width="211" height="58" rx="12" fill="#fffbeb" stroke="#fde68a"/>
+    <text class="t nt" x="532" y="826">:workspace</text>
+    <text class="t nb" x="532" y="846">PRoot Linux sandbox + CMake</text>
+    <rect x="745" y="802" width="211" height="58" rx="12" fill="#fffbeb" stroke="#fde68a"/>
+    <text class="t nt" x="759" y="826">MCP client</text>
+    <text class="t nb" x="759" y="846">SSE + Streamable HTTP transports</text>
+  </g>
+  <path class="ar" d="M510,858 V878" marker-end="url(#arw)"/>
+
+  <g filter="url(#sh)">
+    <rect x="40" y="882" width="940" height="166" rx="16" fill="#ffffff" stroke="#e2e8f0"/>
+    <rect x="56" y="900" width="4" height="20" rx="2" fill="#f43f5e"/>
+    <text class="t bl" x="70" y="916">5 · DATA &amp; PERSISTENCE (100% ON DEVICE)</text>
+    <rect x="64" y="930" width="211" height="100" rx="12" fill="#fff1f2" stroke="#fecdd3"/>
+    <text class="t nt" x="78" y="956">Room v33</text>
+    <text class="t nb" x="78" y="976">conversations, messages,</text>
+    <text class="t nb" x="78" y="992">memories, embedding cache,</text>
+    <text class="t nb" x="78" y="1008">attachments, usage stats</text>
+    <rect x="291" y="930" width="211" height="100" rx="12" fill="#fff1f2" stroke="#fecdd3"/>
+    <text class="t nt" x="305" y="956">SettingsStore</text>
+    <text class="t nb" x="305" y="976">DataStore + normalization,</text>
+    <text class="t nb" x="305" y="992">secret migration, then persist</text>
+    <text class="t nb" x="305" y="1008">through update { }</text>
+    <rect x="518" y="930" width="211" height="100" rx="12" fill="#fff1f2" stroke="#fecdd3"/>
+    <text class="t nt" x="532" y="956">SecureStore</text>
+    <text class="t nb" x="532" y="976">EncryptedSharedPreferences,</text>
+    <text class="t nb" x="532" y="992">SecretKeyManager key map,</text>
+    <text class="t nb" x="532" y="1008">no plaintext keys in settings</text>
+    <rect x="745" y="930" width="211" height="100" rx="12" fill="#fff1f2" stroke="#fecdd3"/>
+    <text class="t nt" x="759" y="956">Files &amp; backup</text>
+    <text class="t nb" x="759" y="976">attachments (sha256 dedup),</text>
+    <text class="t nb" x="759" y="992">WebDAV sync, backup archive,</text>
+    <text class="t nb" x="759" y="1008">external chat importers</text>
+  </g>
+  <path class="ar" d="M510,1048 V1068" marker-end="url(#arw)"/>
+
+  <g filter="url(#sh)">
+    <rect x="40" y="1072" width="940" height="146" rx="16" fill="#ffffff" stroke="#e2e8f0"/>
+    <rect x="56" y="1090" width="4" height="20" rx="2" fill="#64748b"/>
+    <text class="t bl" x="70" y="1106">6 · PLATFORM LAYER (KMP CONTRACTS + ANDROID ADAPTERS)</text>
+    <rect x="64" y="1120" width="286" height="82" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+    <text class="t nt" x="78" y="1146">:shared (Kotlin Multiplatform)</text>
+    <text class="t nb" x="78" y="1166">PlatformHttpClient, PlatformFileStore,</text>
+    <text class="t nb" x="78" y="1182">JwtSigner, MediaEncoder, SecureSettingsStore</text>
+    <rect x="367" y="1120" width="286" height="82" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+    <text class="t nt" x="381" y="1146">:common (Android adapters)</text>
+    <text class="t nb" x="381" y="1166">OkHttpPlatformHttpClient, AndroidFileStore,</text>
+    <text class="t nb" x="381" y="1182">URL / JSON / HTML helpers, log ring buffer</text>
+    <rect x="670" y="1120" width="286" height="82" rx="12" fill="#f8fafc" stroke="#cbd5e1"/>
+    <text class="t nt" x="684" y="1146">Android runtime services</text>
+    <text class="t nb" x="684" y="1166">foreground WebServerService (WifiLock),</text>
+    <text class="t nb" x="684" y="1182">NSD/mDNS, NotificationListener, Crashlytics</text>
+  </g>
+
+  <g filter="url(#sh)">
+    <rect x="1064" y="110" width="456" height="1108" rx="16" fill="#f7fbfe" stroke="#bae6fd"/>
+    <rect x="1080" y="128" width="4" height="20" rx="2" fill="#0284c7"/>
+    <text class="t bl" x="1094" y="144">REMOTE ACCESS — EMBEDDED WEB UI</text>
+    <rect x="1088" y="166" width="408" height="118" rx="12" fill="#ffffff" stroke="#bae6fd"/>
+    <text class="t nt" x="1102" y="192">Browser / PWA</text>
+    <text class="t nb" x="1102" y="212">React Router 7 SPA (web-ui/), Tailwind v4,</text>
+    <text class="t nb" x="1102" y="228">Radix, zustand, shiki, KaTeX, i18next —</text>
+    <text class="t nb" x="1102" y="244">shipped inside the APK, no CDN needed</text>
+    <path class="ar" d="M1292,284 V296" marker-end="url(#arw)"/>
+    <rect x="1088" y="300" width="408" height="118" rx="12" fill="#ffffff" stroke="#bae6fd"/>
+    <text class="t nt" x="1102" y="326">Ktor CIO server — port 8080</text>
+    <text class="t nb" x="1102" y="346">static SPA assets + REST /api/* + SSE</text>
+    <text class="t nb" x="1102" y="362">streams, started by WebServerService</text>
+    <text class="t nb" x="1102" y="378">(foreground, holds a WifiLock)</text>
+    <path class="ar" d="M1292,418 V430" marker-end="url(#arw)"/>
+    <rect x="1088" y="434" width="408" height="118" rx="12" fill="#ffffff" stroke="#bae6fd"/>
+    <text class="t nt" x="1102" y="460">Auth and discovery</text>
+    <text class="t nb" x="1102" y="480">JWT HMAC-SHA256, 30-day TTL, issued by</text>
+    <text class="t nb" x="1102" y="496">/api/auth/token behind an optional password</text>
+    <text class="t nb" x="1102" y="512">gate; NSD/mDNS advertises _http._tcp.local.</text>
+    <path class="ar" d="M1292,552 V564" marker-end="url(#arw)"/>
+    <rect x="1088" y="568" width="408" height="150" rx="12" fill="#ffffff" stroke="#bae6fd"/>
+    <text class="t nt" x="1102" y="594">WebApi routes</text>
+    <text class="t nb" x="1102" y="614">/auth/token, /bootstrap, /ai-icon</text>
+    <text class="t nb" x="1102" y="630">/conversations: paged, search, stream, messages,</text>
+    <text class="t nb" x="1102" y="646">edit, fork, regenerate, stop, tool-approval</text>
+    <text class="t nb" x="1102" y="662">/settings: assistant, model, tools, search, MCP</text>
+    <text class="t nb" x="1102" y="678">/files: upload, content, path</text>
+    <path class="ar" d="M1292,718 V730" marker-end="url(#arw)"/>
+    <rect x="1088" y="734" width="408" height="118" rx="12" fill="#ffffff" stroke="#bae6fd"/>
+    <text class="t nt" x="1102" y="760">WebDtos + WebMedia</text>
+    <text class="t nb" x="1102" y="780">Settings / Conversation / UIMessage ↔ DTO</text>
+    <text class="t nb" x="1102" y="796">mappers; file://, content:// and android.resource://</text>
+    <text class="t nb" x="1102" y="812">become /api/files/content?uri=...</text>
+    <path class="ar" d="M1292,852 V864" marker-end="url(#arw)"/>
+    <rect x="1088" y="868" width="408" height="118" rx="12" fill="#ffffff" stroke="#bae6fd"/>
+    <text class="t nt" x="1102" y="894">SSE fan-out</text>
+    <text class="t nb" x="1102" y="914">conversation and settings updates are pushed</text>
+    <text class="t nb" x="1102" y="930">straight from the ChatService flows, so the</text>
+    <text class="t nb" x="1102" y="946">browser sees tokens as they stream</text>
+    <path class="ar" d="M1292,986 V1032" stroke-dasharray="5 5" marker-end="url(#arw)"/>
+    <rect x="1088" y="1036" width="408" height="154" rx="12" fill="#ffffff" stroke="#bae6fd" stroke-dasharray="5 5"/>
+    <text class="t nt" x="1102" y="1062">Why this matters</text>
+    <text class="t nb" x="1102" y="1082">The phone is the server. No account, no cloud</text>
+    <text class="t nb" x="1102" y="1098">relay, no third-party backend: open the LAN URL</text>
+    <text class="t nb" x="1102" y="1114">from any browser on the same Wi-Fi and you get</text>
+    <text class="t nb" x="1102" y="1130">the same assistants, models, memory and history</text>
+    <text class="t nb" x="1102" y="1146">that live on the device.</text>
+  </g>
+
+  <path class="arc" d="M1088,927 H1022 V386 H988" marker-end="url(#arwAcc)"/>
+  <text class="t nb" x="1034" y="660" transform="rotate(-90 1034 660)" fill="#0d9488">REST + SSE bridge</text>
+
+  <rect x="40" y="1244" width="14" height="14" rx="4" fill="#f0fdfa" stroke="#99f6e4"/>
+  <text class="t lg" x="60" y="1256">Compose UI</text>
+  <rect x="150" y="1244" width="14" height="14" rx="4" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text class="t lg" x="170" y="1256">State</text>
+  <rect x="225" y="1244" width="14" height="14" rx="4" fill="#f5f3ff" stroke="#ddd6fe"/>
+  <text class="t lg" x="245" y="1256">Orchestration</text>
+  <rect x="335" y="1244" width="14" height="14" rx="4" fill="#fffbeb" stroke="#fde68a"/>
+  <text class="t lg" x="355" y="1256">Capability modules</text>
+  <rect x="480" y="1244" width="14" height="14" rx="4" fill="#fff1f2" stroke="#fecdd3"/>
+  <text class="t lg" x="500" y="1256">Data</text>
+  <rect x="550" y="1244" width="14" height="14" rx="4" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text class="t lg" x="570" y="1256">Platform</text>
+  <rect x="645" y="1244" width="14" height="14" rx="4" fill="#ffffff" stroke="#bae6fd" stroke-dasharray="4 4"/>
+  <text class="t lg" x="665" y="1256">Web UI / optional</text>
+  <text class="t lg" x="786" y="1256">Solid arrows = runtime flow · dashed = build time or optional</text>
+</svg>

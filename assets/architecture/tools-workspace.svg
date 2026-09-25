@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 920" width="1600" height="920" role="img" aria-label="Local AI tool ecosystem and PRoot workspace sandbox">
+  <defs>
+    <marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <filter id="sh5" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <style>
+      .t5{font-family:'Segoe UI',Inter,Roboto,Helvetica,Arial,sans-serif;fill:#0f172a}
+      .ttl5{font-size:30px;font-weight:700}
+      .sub5{font-size:14.5px;fill:#64748b}
+      .bl5{font-size:12.5px;font-weight:700;letter-spacing:.07em;fill:#0f172a}
+      .nt5{font-size:12.5px;font-weight:600;fill:#0f172a}
+      .nb5{font-size:10.5px;fill:#475569}
+      .ar5{stroke:#94a3b8;stroke-width:2.2;fill:none}
+      .lg5{font-size:11.5px;fill:#475569}
+    </style>
+  </defs>
+
+  <rect width="1600" height="920" fill="#ffffff"/>
+  <text class="t5 ttl5" x="60" y="52">Tools and the PRoot Workspace</text>
+  <text class="t5 sub5" x="60" y="78">Which tools exist, how the approval gate protects them, and how a Linux sandbox gives the assistant a real shell without root.</text>
+
+  <g filter="url(#sh5)">
+    <rect x="60" y="110" width="420" height="720" rx="16" fill="#ffffff" stroke="#e2e8f0"/>
+    <rect x="76" y="128" width="4" height="20" rx="2" fill="#f59e0b"/>
+    <text class="t5 bl5" x="90" y="144">TOOL REGISTRY — RESOLVED PER TURN</text>
+    <rect x="80" y="160" width="380" height="90" rx="12" fill="#fffbeb" stroke="#fde68a"/>
+    <text class="t5 nt5" x="94" y="186">LocalTools (in-process)</text>
+    <text class="t5 nb5" x="94" y="206">eval_javascript (QuickJS), text_to_speech, generate_image,</text>
+    <text class="t5 nb5" x="94" y="222">send_notification, get_notifications</text>
+    <rect x="80" y="270" width="380" height="90" rx="12" fill="#fffbeb" stroke="#fde68a"/>
+    <text class="t5 nt5" x="94" y="296">Scheduling tools</text>
+    <text class="t5 nb5" x="94" y="316">schedule_message persists a WorkManager spec, so the model</text>
+    <text class="t5 nb5" x="94" y="332">can arrange to talk to you later (ScheduledMessageWorker)</text>
+    <rect x="80" y="380" width="380" height="90" rx="12" fill="#fffbeb" stroke="#fde68a"/>
+    <text class="t5 nt5" x="94" y="406">Memory and skills</text>
+    <text class="t5 nb5" x="94" y="426">search_memory recalls episodes and core memories; manage_skills</text>
+    <text class="t5 nb5" x="94" y="442">lets the assistant toggle skills for the turn</text>
+    <rect x="80" y="490" width="380" height="90" rx="12" fill="#fffbeb" stroke="#fde68a"/>
+    <text class="t5 nt5" x="94" y="516">ask_user (CharacterQuestions)</text>
+    <text class="t5 nb5" x="94" y="536">the model can stop and ask a question mid-turn instead of</text>
+    <text class="t5 nb5" x="94" y="552">guessing — answered inline in the chat UI</text>
+    <rect x="80" y="600" width="380" height="90" rx="12" fill="#fffbeb" stroke="#fde68a"/>
+    <text class="t5 nt5" x="94" y="626">WorkspaceTools (PRoot)</text>
+    <text class="t5 nb5" x="94" y="646">workspace_read_file, workspace_write_file, workspace_edit_file,</text>
+    <text class="t5 nb5" x="94" y="662">workspace_shell</text>
+    <rect x="80" y="710" width="380" height="90" rx="12" fill="#fffbeb" stroke="#fde68a"/>
+    <text class="t5 nt5" x="94" y="736">MCP tools (dynamic)</text>
+    <text class="t5 nb5" x="94" y="756">registered live by McpManager whenever settings.mcpServers</text>
+    <text class="t5 nb5" x="94" y="772">changes — no restart needed</text>
+  </g>
+
+  <g filter="url(#sh5)">
+    <rect x="540" y="110" width="360" height="720" rx="16" fill="#ffffff" stroke="#e2e8f0"/>
+    <rect x="556" y="128" width="4" height="20" rx="2" fill="#f43f5e"/>
+    <text class="t5 bl5" x="570" y="144">APPROVAL GATE</text>
+    <rect x="560" y="160" width="320" height="90" rx="12" fill="#fff1f2" stroke="#fecdd3"/>
+    <text class="t5 nt5" x="574" y="186">Per-tool decision</text>
+    <text class="t5 nb5" x="574" y="206">resolveWorkspaceToolApproval(name, overrides)</text>
+    <text class="t5 nb5" x="574" y="222">returns whether a tool needs a yes first</text>
+    <rect x="560" y="270" width="320" height="90" rx="12" fill="#fff1f2" stroke="#fecdd3"/>
+    <text class="t5 nt5" x="574" y="296">Overrides</text>
+    <text class="t5 nb5" x="574" y="316">stored per assistant and per tool, so a</text>
+    <text class="t5 nb5" x="574" y="332">trusted setup can auto-approve reads only</text>
+    <rect x="560" y="380" width="320" height="90" rx="12" fill="#fff1f2" stroke="#fecdd3"/>
+    <text class="t5 nt5" x="574" y="406">Web and app parity</text>
+    <text class="t5 nb5" x="574" y="426">in-chat dialog on Android, and the</text>
+    <text class="t5 nb5" x="574" y="442">/api/conversations/{id}/tool-approval route</text>
+    <text class="t5 nb5" x="574" y="458">for the browser client</text>
+    <rect x="560" y="490" width="320" height="130" rx="12" fill="#fff1f2" stroke="#fecdd3"/>
+    <text class="t5 nt5" x="574" y="516">Why it matters</text>
+    <text class="t5 nb5" x="574" y="536">The assistant is allowed to read files,</text>
+    <text class="t5 nb5" x="574" y="552">write files, run a shell, post notifications</text>
+    <text class="t5 nb5" x="574" y="568">and schedule messages — so every one of</text>
+    <text class="t5 nb5" x="574" y="584">those powers is inspectable and revocable</text>
+    <text class="t5 nb5" x="574" y="600">from settings, not hard-coded.</text>
+  </g>
+  <path class="ar5" d="M480,425 H532" marker-end="url(#a5)"/>
+
+  <g filter="url(#sh5)">
+    <rect x="960" y="110" width="580" height="720" rx="16" fill="#ffffff" stroke="#e2e8f0"/>
+    <rect x="976" y="128" width="4" height="20" rx="2" fill="#14b8a6"/>
+    <text class="t5 bl5" x="990" y="144">PRoot LINUX SANDBOX — THE :workspace MODULE</text>
+    <rect x="980" y="160" width="540" height="90" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t5 nt5" x="994" y="186">RootfsInstaller + RootfsPatcher</text>
+    <text class="t5 nb5" x="994" y="206">installs a Linux rootfs into app-private storage and patches it for</text>
+    <text class="t5 nb5" x="994" y="222">Android (bionic paths, shared memory, temp directories)</text>
+    <rect x="980" y="268" width="540" height="90" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t5 nt5" x="994" y="294">ProotRuntime + ProotShellRunner + termux_pty.cpp</text>
+    <text class="t5 nb5" x="994" y="314">spawns a real PTY shell through libproot_exec.so — user-space</text>
+    <text class="t5 nb5" x="994" y="330">emulation, so no root and no unlocked bootloader is required</text>
+    <rect x="980" y="376" width="540" height="90" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t5 nt5" x="994" y="402">WorkspaceFileSystem + WorkspaceRepository</text>
+    <text class="t5 nb5" x="994" y="422">area-scoped read / write / edit (workspace, home, rootfs) with the</text>
+    <text class="t5 nb5" x="994" y="438">same path guards used by the web API</text>
+    <rect x="980" y="484" width="540" height="90" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t5 nt5" x="994" y="510">WorkspaceDocumentsProvider (SAF)</text>
+    <text class="t5 nb5" x="994" y="530">exposes workspace files to other apps through the system file</text>
+    <text class="t5 nb5" x="994" y="546">picker — copy files in and out without leaving Android</text>
+    <rect x="980" y="592" width="540" height="90" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t5 nt5" x="994" y="618">Native libraries, per ABI</text>
+    <text class="t5 nb5" x="994" y="638">libproot_exec, libproot_loader(32), libtalloc, libandroid-shmem for</text>
+    <text class="t5 nb5" x="994" y="654">arm64-v8a and x86_64, built with CMake in the module</text>
+    <rect x="980" y="700" width="540" height="90" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t5 nt5" x="994" y="726">What this unlocks</text>
+    <text class="t5 nb5" x="994" y="746">install packages, run scripts, convert media, compile small projects</text>
+    <text class="t5 nb5" x="994" y="762">and hand the result back into the chat as a file or an answer</text>
+  </g>
+  <path class="ar5" d="M900,425 H952" marker-end="url(#a5)"/>
+
+  <text class="t5 lg5" x="60" y="866">eval_javascript runs in-process inside QuickJS (the :highlight module). Python and any other Linux tooling runs inside the PRoot rootfs through workspace_shell;</text>
+  <text class="t5 lg5" x="60" y="886">app/src/main/python/executor.py is no longer wired up by any Kotlin source. MCP traffic uses a dedicated HTTP client with no AI request interceptor and no body logging.</text>
+</svg>

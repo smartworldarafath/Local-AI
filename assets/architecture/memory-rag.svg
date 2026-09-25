@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1560 860" width="1560" height="860" role="img" aria-label="Local AI memory and RAG pipeline">
+  <defs>
+    <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <filter id="sh4" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <style>
+      .t4{font-family:'Segoe UI',Inter,Roboto,Helvetica,Arial,sans-serif;fill:#0f172a}
+      .ttl4{font-size:30px;font-weight:700}
+      .sub4{font-size:14.5px;fill:#64748b}
+      .bl4{font-size:12.5px;font-weight:700;letter-spacing:.07em;fill:#0f172a}
+      .nt4{font-size:12.5px;font-weight:600;fill:#0f172a}
+      .nb4{font-size:10.5px;fill:#475569}
+      .ar4{stroke:#94a3b8;stroke-width:2;fill:none}
+      .lg4{font-size:11.5px;fill:#475569}
+    </style>
+  </defs>
+
+  <rect width="1560" height="860" fill="#ffffff"/>
+  <text class="t4 ttl4" x="40" y="52">Memory and RAG Engine</text>
+  <text class="t4 sub4" x="40" y="78">Everything stays local: episodes are chunked, embedded by an EMBEDDING model from the catalog, cached as float vectors, recalled by cosine similarity.</text>
+
+  <g filter="url(#sh4)">
+    <rect x="40" y="120" width="1480" height="180" rx="16" fill="#ffffff" stroke="#e2e8f0"/>
+    <rect x="56" y="140" width="4" height="20" rx="2" fill="#14b8a6"/>
+    <text class="t4 bl4" x="70" y="156">WRITE PATH — HOW A MEMORY IS FORMED</text>
+    <rect x="80" y="186" width="260" height="84" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t4 nt4" x="94" y="214">Conversation turn</text>
+    <text class="t4 nb4" x="94" y="234">user message + assistant answer</text>
+    <text class="t4 nb4" x="94" y="250">stay inside the local database</text>
+    <rect x="364" y="186" width="260" height="84" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t4 nt4" x="378" y="214">Memory tool / auto-memory</text>
+    <text class="t4 nb4" x="378" y="234">Advanced Memory mode forms episodic</text>
+    <text class="t4 nb4" x="378" y="250">memories automatically after a turn</text>
+    <rect x="648" y="186" width="260" height="84" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t4 nt4" x="662" y="214">MemoryChunker</text>
+    <text class="t4 nb4" x="662" y="234">splits conversation content into</text>
+    <text class="t4 nb4" x="662" y="250">embedding-sized chunks (episodes)</text>
+    <rect x="932" y="186" width="260" height="84" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t4 nt4" x="946" y="214">EmbeddingService</text>
+    <text class="t4 nb4" x="946" y="234">calls the EMBEDDING model chosen in</text>
+    <text class="t4 nb4" x="946" y="250">the model catalog, one batch at a time</text>
+    <rect x="1216" y="186" width="260" height="84" rx="12" fill="#f0fdfa" stroke="#99f6e4"/>
+    <text class="t4 nt4" x="1230" y="214">Local vector store</text>
+    <text class="t4 nb4" x="1230" y="234">MemoryEntity + EmbeddingCacheEntity,</text>
+    <text class="t4 nb4" x="1230" y="250">keyed by memory + type + model id</text>
+    <path class="ar4" d="M342,228 H360" marker-end="url(#a4)"/>
+    <path class="ar4" d="M626,228 H644" marker-end="url(#a4)"/>
+    <path class="ar4" d="M910,228 H928" marker-end="url(#a4)"/>
+    <path class="ar4" d="M1194,228 H1212" marker-end="url(#a4)"/>
+  </g>
+
+  <g filter="url(#sh4)">
+    <rect x="40" y="330" width="1480" height="180" rx="16" fill="#ffffff" stroke="#e2e8f0"/>
+    <rect x="56" y="350" width="4" height="20" rx="2" fill="#3b82f6"/>
+    <text class="t4 bl4" x="70" y="366">READ PATH — RECALL WHILE ANSWERING</text>
+    <rect x="80" y="396" width="260" height="84" rx="12" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text class="t4 nt4" x="94" y="424">Incoming user message</text>
+    <text class="t4 nb4" x="94" y="444">the new turn becomes the query text,</text>
+    <text class="t4 nb4" x="94" y="460">no extra network round trip</text>
+    <rect x="364" y="396" width="260" height="84" rx="12" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text class="t4 nt4" x="378" y="424">Query embedding</text>
+    <text class="t4 nb4" x="378" y="444">EmbeddingService.embed(query) with</text>
+    <text class="t4 nb4" x="378" y="460">the same model used on the write path</text>
+    <rect x="648" y="396" width="260" height="84" rx="12" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text class="t4 nt4" x="662" y="424">VectorEngine cosine scan</text>
+    <text class="t4 nb4" x="662" y="444">pure Kotlin dot product over the cached</text>
+    <text class="t4 nb4" x="662" y="460">float vectors — no native index needed</text>
+    <rect x="932" y="396" width="260" height="84" rx="12" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text class="t4 nt4" x="946" y="424">Top-K + threshold</text>
+    <text class="t4 nb4" x="946" y="444">retrieveRelevantMemories(limit, 0.5f);</text>
+    <text class="t4 nb4" x="946" y="460">the assistant ragLimit overrides limit</text>
+    <rect x="1216" y="396" width="260" height="84" rx="12" fill="#eff6ff" stroke="#bfdbfe"/>
+    <text class="t4 nt4" x="1230" y="424">Prompt injection</text>
+    <text class="t4 nb4" x="1230" y="444">buildMemoryPrompt() renders the recalled</text>
+    <text class="t4 nb4" x="1230" y="460">memories into context before the call</text>
+    <path class="ar4" d="M342,438 H360" marker-end="url(#a4)"/>
+    <path class="ar4" d="M626,438 H644" marker-end="url(#a4)"/>
+    <path class="ar4" d="M910,438 H928" marker-end="url(#a4)"/>
+    <path class="ar4" d="M1194,438 H1212" marker-end="url(#a4)"/>
+  </g>
+  <text class="t4 lg4" x="80" y="545">The model can also call the search_memory tool to deliberately recall core memories, older episodes and past chats instead of relying on automatic injection.</text>
+  <text class="t4 lg4" x="80" y="566">MemoryItemEntity and MemoryItemFtsEntity exist in the tree but are not registered in the Room database yet, so full-text memory search is still work in progress.</text>
+
+  <g filter="url(#sh4)">
+    <rect x="40" y="600" width="1480" height="180" rx="16" fill="#ffffff" stroke="#e2e8f0"/>
+    <rect x="56" y="620" width="4" height="20" rx="2" fill="#8b5cf6"/>
+    <text class="t4 bl4" x="70" y="636">MAINTENANCE — KEEPING MEMORY AND FILES TIDY</text>
+    <rect x="80" y="666" width="340" height="84" rx="12" fill="#f5f3ff" stroke="#ddd6fe"/>
+    <text class="t4 nt4" x="94" y="694">MemoryConsolidationWorker</text>
+    <text class="t4 nb4" x="94" y="714">periodic WorkManager job that merges and</text>
+    <text class="t4 nb4" x="94" y="730">summarises related episodic memories</text>
+    <rect x="444" y="666" width="340" height="84" rx="12" fill="#f5f3ff" stroke="#ddd6fe"/>
+    <text class="t4 nt4" x="458" y="694">ChatStorageMaintenanceWorker</text>
+    <text class="t4 nb4" x="458" y="714">prunes orphaned attachments and stale rows</text>
+    <text class="t4 nb4" x="458" y="730">so the database does not grow forever</text>
+    <rect x="808" y="666" width="340" height="84" rx="12" fill="#f5f3ff" stroke="#ddd6fe"/>
+    <text class="t4 nt4" x="822" y="694">Usage stats</text>
+    <text class="t4 nb4" x="822" y="714">UsageStats and DailyActivity rows power</text>
+    <text class="t4 nb4" x="822" y="730">the Statistics screen (tokens, messages)</text>
+    <rect x="1172" y="666" width="304" height="84" rx="12" fill="#f5f3ff" stroke="#ddd6fe"/>
+    <text class="t4 nt4" x="1186" y="694">Backup and sync</text>
+    <text class="t4 nb4" x="1186" y="714">WebDAV sync + backup archive carry the</text>
+    <text class="t4 nb4" x="1186" y="730">whole memory store with the chat history</text>
+  </g>
+  <text class="t4 lg4" x="80" y="820">Consolidation and chunking both run through the same embedding service, so switching embedding model only invalidates cache rows for that model id — switches never wipe history.</text>
+</svg>

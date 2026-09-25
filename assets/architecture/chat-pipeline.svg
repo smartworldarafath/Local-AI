@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1680 900" width="1680" height="900" role="img" aria-label="Local AI chat generation pipeline">
+  <defs>
+    <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="a3r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#f43f5e"/>
+    </marker>
+    <filter id="sh3" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/>
+    </filter>
+    <style>
+      .t3{font-family:'Segoe UI',Inter,Roboto,Helvetica,Arial,sans-serif;fill:#0f172a}
+      .ttl3{font-size:30px;font-weight:700}
+      .sub3{font-size:14.5px;fill:#64748b}
+      .ch{font-size:13.5px;font-weight:700;fill:#ffffff}
+      .cs{font-size:10px;fill:#ffffff;opacity:.92}
+      .nb3{font-size:11px;fill:#334155}
+      .nbs{font-size:10.5px;fill:#64748b}
+      .ar3{stroke:#94a3b8;stroke-width:2.2;fill:none}
+      .ar3r{stroke:#f43f5e;stroke-width:2;fill:none;stroke-dasharray:7 5}
+      .lg3{font-size:11.5px;fill:#475569}
+      .nth{font-size:12px;font-weight:600;fill:#0f172a}
+    </style>
+  </defs>
+
+  <rect width="1680" height="900" fill="#ffffff"/>
+  <text class="t3 ttl3" x="50" y="52">Chat Generation Pipeline</text>
+  <text class="t3 sub3" x="50" y="78">What happens between "send" and the answer: input transformers, context assembly, one provider request, a tool loop, output transformers, then persistence.</text>
+
+  <!-- ===== column 1 ===== -->
+  <rect x="50" y="110" width="250" height="460" rx="14" fill="#ffffff" stroke="#e2e8f0"/>
+  <path d="M50,124 a14,14 0 0 1 14,-14 h222 a14,14 0 0 1 14,14 v38 h-250 z" fill="#14b8a6"/>
+  <text class="t3 ch" x="64" y="134">1 · Input</text>
+  <text class="t3 cs" x="64" y="152">what the user hands over</text>
+  <rect x="62" y="176" width="226" height="46" rx="10" fill="#f0fdfa" stroke="#99f6e4"/>
+  <text class="t3 nb3" x="74" y="204">User message (text / rich text)</text>
+  <rect x="62" y="232" width="226" height="46" rx="10" fill="#f0fdfa" stroke="#99f6e4"/>
+  <text class="t3 nb3" x="74" y="260">Attachments: image, video, audio</text>
+  <rect x="62" y="288" width="226" height="46" rx="10" fill="#f0fdfa" stroke="#99f6e4"/>
+  <text class="t3 nb3" x="74" y="316">Documents: PDF, DOCX</text>
+  <rect x="62" y="344" width="226" height="46" rx="10" fill="#f0fdfa" stroke="#99f6e4"/>
+  <text class="t3 nb3" x="74" y="372">Share intent and text selection</text>
+  <rect x="62" y="400" width="226" height="46" rx="10" fill="#f0fdfa" stroke="#99f6e4"/>
+  <text class="t3 nb3" x="74" y="428">Web upload: /api/files/upload</text>
+
+  <!-- ===== column 2 ===== -->
+  <rect x="316" y="110" width="250" height="460" rx="14" fill="#ffffff" stroke="#e2e8f0"/>
+  <path d="M316,124 a14,14 0 0 1 14,-14 h222 a14,14 0 0 1 14,14 v38 h-250 z" fill="#8b5cf6"/>
+  <text class="t3 ch" x="330" y="134">2 · Input transformers</text>
+  <text class="t3 cs" x="330" y="152">normalise, expand, extract</text>
+  <rect x="328" y="176" width="226" height="46" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
+  <text class="t3 nb3" x="340" y="204">TemplateTransformer (Pebble)</text>
+  <rect x="328" y="232" width="226" height="46" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
+  <text class="t3 nb3" x="340" y="260">PlaceholderTransformer (runtime)</text>
+  <rect x="328" y="288" width="226" height="46" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
+  <text class="t3 nb3" x="340" y="316">OcrTransformer (vision model)</text>
+  <rect x="328" y="344" width="226" height="46" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
+  <text class="t3 nb3" x="340" y="372">DocumentAsPromptTransformer</text>
+  <rect x="328" y="400" width="226" height="46" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
+  <text class="t3 nb3" x="340" y="428">Base64Image → local file</text>
+  <rect x="328" y="456" width="226" height="46" rx="10" fill="#f5f3ff" stroke="#ddd6fe"/>
+  <text class="t3 nb3" x="340" y="484">UnsupportedFile, WorkspaceReminder</text>
+
+  <!-- ===== column 3 ===== -->
+  <rect x="582" y="110" width="250" height="460" rx="14" fill="#ffffff" stroke="#e2e8f0"/>
+  <path d="M582,124 a14,14 0 0 1 14,-14 h222 a14,14 0 0 1 14,14 v38 h-250 z" fill="#3b82f6"/>
+  <text class="t3 ch" x="596" y="134">3 · Context assembly</text>
+  <text class="t3 cs" x="596" y="152">buildMessages() — the prompt</text>
+  <rect x="594" y="176" width="226" height="46" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text class="t3 nb3" x="606" y="204">Assistant system prompt</text>
+  <rect x="594" y="232" width="226" height="46" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text class="t3 nb3" x="606" y="260">Lorebook entries + Skills</text>
+  <rect x="594" y="288" width="226" height="46" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text class="t3 nb3" x="606" y="316">Time awareness block</text>
+  <rect x="594" y="344" width="226" height="46" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text class="t3 nb3" x="606" y="372">limitContext(n) — keeps tool chains</text>
+  <rect x="594" y="400" width="226" height="46" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text class="t3 nb3" x="606" y="428">RAG memory injection (top-K)</text>
+  <rect x="594" y="456" width="226" height="46" rx="10" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text class="t3 nb3" x="606" y="484">Reference recent chats (optional)</text>
+  <!-- ===== column 4 ===== -->
+  <rect x="848" y="110" width="250" height="460" rx="14" fill="#ffffff" stroke="#e2e8f0"/>
+  <path d="M848,124 a14,14 0 0 1 14,-14 h222 a14,14 0 0 1 14,14 v38 h-250 z" fill="#f59e0b"/>
+  <text class="t3 ch" x="862" y="134">4 · Provider request</text>
+  <text class="t3 cs" x="862" y="152">one call, one stream</text>
+  <rect x="860" y="176" width="226" height="46" rx="10" fill="#fffbeb" stroke="#fde68a"/>
+  <text class="t3 nb3" x="872" y="204">ProviderManager → provider</text>
+  <rect x="860" y="232" width="226" height="46" rx="10" fill="#fffbeb" stroke="#fde68a"/>
+  <text class="t3 nb3" x="872" y="260">OpenAI: Completions / Responses</text>
+  <rect x="860" y="288" width="226" height="46" rx="10" fill="#fffbeb" stroke="#fde68a"/>
+  <text class="t3 nb3" x="872" y="316">Google Gemini / Vertex, Claude</text>
+  <rect x="860" y="344" width="226" height="46" rx="10" fill="#fffbeb" stroke="#fde68a"/>
+  <text class="t3 nb3" x="872" y="372">ComfyUI for image generation</text>
+  <rect x="860" y="400" width="226" height="46" rx="10" fill="#fffbeb" stroke="#fde68a"/>
+  <text class="t3 nb3" x="872" y="428">KeyRoulette + provider override</text>
+  <rect x="860" y="456" width="226" height="46" rx="10" fill="#fffbeb" stroke="#fde68a"/>
+  <text class="t3 nb3" x="872" y="484">429 retry ×3, host-specific flags</text>
+
+  <!-- ===== column 5 ===== -->
+  <rect x="1114" y="110" width="250" height="460" rx="14" fill="#ffffff" stroke="#e2e8f0"/>
+  <path d="M1114,124 a14,14 0 0 1 14,-14 h222 a14,14 0 0 1 14,14 v38 h-250 z" fill="#f43f5e"/>
+  <text class="t3 ch" x="1128" y="134">5 · Streaming and tools</text>
+  <text class="t3 cs" x="1128" y="152">the agent loop</text>
+  <rect x="1126" y="176" width="226" height="46" rx="10" fill="#fff1f2" stroke="#fecdd3"/>
+  <text class="t3 nb3" x="1138" y="204">SSE stream (PlatformHttpClient)</text>
+  <rect x="1126" y="232" width="226" height="46" rx="10" fill="#fff1f2" stroke="#fecdd3"/>
+  <text class="t3 nb3" x="1138" y="260">handleMessageChunk(…) merge</text>
+  <rect x="1126" y="288" width="226" height="46" rx="10" fill="#fff1f2" stroke="#fecdd3"/>
+  <text class="t3 nb3" x="1138" y="316">Tool loop — up to 256 steps</text>
+  <rect x="1126" y="344" width="226" height="46" rx="10" fill="#fff1f2" stroke="#fecdd3"/>
+  <text class="t3 nb3" x="1138" y="372">Approval gate for sensitive tools</text>
+  <rect x="1126" y="400" width="226" height="46" rx="10" fill="#fff1f2" stroke="#fecdd3"/>
+  <text class="t3 nb3" x="1138" y="428">LocalTools, WorkspaceTools, MCP</text>
+  <rect x="1126" y="456" width="226" height="46" rx="10" fill="#fff1f2" stroke="#fecdd3"/>
+  <text class="t3 nb3" x="1138" y="484">Checkpoint every 1s → Room</text>
+
+  <!-- ===== column 6 ===== -->
+  <rect x="1380" y="110" width="250" height="460" rx="14" fill="#ffffff" stroke="#e2e8f0"/>
+  <path d="M1380,124 a14,14 0 0 1 14,-14 h222 a14,14 0 0 1 14,14 v38 h-250 z" fill="#10b981"/>
+  <text class="t3 ch" x="1394" y="134">6 · Output and storage</text>
+  <text class="t3 cs" x="1394" y="152">render and remember</text>
+  <rect x="1392" y="176" width="226" height="46" rx="10" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text class="t3 nb3" x="1404" y="204">ThinkTagTransformer: reasoning</text>
+  <rect x="1392" y="232" width="226" height="46" rx="10" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text class="t3 nb3" x="1404" y="260">RegexOutputTransformer rewrites</text>
+  <rect x="1392" y="288" width="226" height="46" rx="10" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text class="t3 nb3" x="1404" y="316">visualTransform hook (streaming)</text>
+  <rect x="1392" y="344" width="226" height="46" rx="10" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text class="t3 nb3" x="1404" y="372">onGenerationFinish hook</text>
+  <rect x="1392" y="400" width="226" height="46" rx="10" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text class="t3 nb3" x="1404" y="428">Persist MessageNode (branching)</text>
+  <rect x="1392" y="456" width="226" height="46" rx="10" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text class="t3 nb3" x="1404" y="484">Usage stats, auto title / summary</text>
+
+  <path class="ar3" d="M300,340 H312" marker-end="url(#a3)"/>
+  <path class="ar3" d="M566,340 H578" marker-end="url(#a3)"/>
+  <path class="ar3" d="M832,340 H844" marker-end="url(#a3)"/>
+  <path class="ar3" d="M1098,340 H1110" marker-end="url(#a3)"/>
+  <path class="ar3" d="M1364,340 H1376" marker-end="url(#a3)"/>
+
+  <path class="ar3r" d="M1239,570 V664 H973 V574" marker-end="url(#a3r)"/>
+  <text class="t3 nbs" x="1000" y="686" fill="#e11d48">tool loop: tool results are appended and the provider is called again — up to 256 steps per turn</text>
+
+  <rect x="50" y="720" width="520" height="96" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text class="t3 nth" x="68" y="748">Checkpoints and resume</text>
+  <text class="t3 nbs" x="68" y="770">The partial answer is written to Room every second while streaming, so a killed</text>
+  <text class="t3 nbs" x="68" y="788">process does not lose the turn. Auto-resume retries up to 3 times, 700 ms apart.</text>
+  <rect x="586" y="720" width="520" height="96" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text class="t3 nth" x="604" y="748">Cancellation</text>
+  <text class="t3 nbs" x="604" y="770">ChatService keeps one Job per conversation. Stop aborts the SSE stream, keeps</text>
+  <text class="t3 nbs" x="604" y="788">what already arrived, and releases the conversation reference count.</text>
+  <rect x="1122" y="720" width="508" height="96" rx="12" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text class="t3 nth" x="1140" y="748">Persistence modes</text>
+  <text class="t3 nbs" x="1140" y="770">NORMAL · TEMPORARY (nothing is stored) · PERSIST_ON_REPLY, used by</text>
+  <text class="t3 nbs" x="1140" y="788">spontaneous "unrelated" messages so drafts do not pollute history.</text>
+</svg>
