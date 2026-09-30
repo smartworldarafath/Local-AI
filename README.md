@@ -572,44 +572,6 @@ If you find **Local AI** helpful and want to support ongoing development, mainte
 
 <div align="center">
 
-<table>
-  <tr>
-
-    <td align="center" width="25%" valign="top">
-      <h4><img src="assets/icons/supportkori.png" alt="SupportKori" height="26" /> SupportKori</h4>
-      <a href="https://www.supportkori.com/arafathrahman" target="_blank">
-        <img src="assets/supportkori-qr.jpg" alt="SupportKori QR" width="180" style="border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15);" />
-      </a><br/><br/>
-      <a href="https://www.supportkori.com/arafathrahman" target="_blank">
-        <img src="assets/icons/supportkori.png" alt="SupportKori" width="52" />
-      </a><br/>
-      <sub>Cards / bKash / Nagad / Global</sub>
-    </td>
-    <td align="center" width="25%" valign="top">
-      <h4><img src="assets/icons/nsave.png" alt="nsave" height="26" /> nsave</h4>
-      <img src="assets/nsave-qr.jpg" alt="nsave QR" width="180" style="border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15);" /><br/><br/>
-      <img src="assets/icons/nsave.png" alt="nsave" width="52" /><br/>
-      <sub>Ntag: <code>@arafath_rahman9</code></sub>
-    </td>
-    <td align="center" width="25%" valign="top">
-      <h4><img src="assets/icons/redotpay.png" alt="RedotPay" height="26" /> RedotPay</h4>
-      <img src="assets/redotpay-qr.jpg" alt="RedotPay QR" width="180" style="border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15);" /><br/><br/>
-      <img src="assets/icons/redotpay.png" alt="RedotPay" width="52" /><br/>
-      <sub>ID: <code>1965421414</code></sub>
-    </td>
-    <td align="center" width="25%" valign="top">
-      <h4><img src="assets/icons/payoneer.png" alt="Payoneer" height="26" /> Payoneer</h4>
-      <img src="assets/payoneer-info.jpg" alt="Payoneer Info" width="180" style="border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15);" /><br/><br/>
-      <a href="mailto:arafathrahman710@gmail.com?subject=Support%20via%20Payoneer">
-        <img src="assets/icons/payoneer.png" alt="Payoneer" width="52" />
-      </a><br/>
-      <sub>Email: <code>arafathrahman710@gmail.com</code></sub>
-    </td>
-  </tr>
-</table>
-
-<br/>
-
 | Method | Details / Direct Link |
 | :--- | :--- |
 | **<img src="assets/icons/supportkori.png" alt="SupportKori" height="16" /> SupportKori** | [https://www.supportkori.com/arafathrahman](https://www.supportkori.com/arafathrahman) |
