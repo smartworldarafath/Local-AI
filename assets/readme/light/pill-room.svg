@@ -13,5 +13,5 @@
       </g>
       <g transform="translate(-8.5, -8.5) scale(0.7083333333333334)"><path d="M12 2C6.48 2 2 3.79 2 6v12c0 2.21 4.48 4 10 4s10-1.79 10-4V6c0-2.21-4.48-4-10-4zm0 2c4.42 0 8 1.34 8 2s-3.58 2-8 2-8-1.34-8-2 3.58-2 8-2zm-8 6c0-.3.34-.78 1.13-1.25C6.39 9.38 8.98 10 12 10s5.61-.62 6.87-1.25C19.66 9.22 20 9.7 20 10v2c0 .66-3.58 2-8 2s-8-1.34-8-2v-2zm0 6c0-.3.34-.78 1.13-1.25C6.39 15.38 8.98 16 12 16s5.61-.62 6.87-1.25c.79.47 1.13.95 1.13 1.25v2c0 .66-3.58 2-8 2s-8-1.34-8-2v-2z" fill="#251A00"/></g>
     </g>
-    <text x="42" y="26" font-family="system-ui, -apple-system, Roboto, sans-serif" font-size="14.5" font-weight="600" fill="#261b28">Room & SQLite</text>
+    <text x="42" y="26" font-family="system-ui, -apple-system, Roboto, sans-serif" font-size="14.5" font-weight="600" fill="#261b28">Room &amp; SQLite</text>
   </svg>

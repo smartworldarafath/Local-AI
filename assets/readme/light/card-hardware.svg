@@ -19,6 +19,6 @@
     </g>
     <text x="36" y="125" font-family="system-ui, -apple-system, 'Google Sans', Roboto, sans-serif" font-size="21" font-weight="700" fill="#211824">Real-Time Hardware Monitor</text>
     <text x="36" y="152" font-family="system-ui, -apple-system, Roboto, sans-serif" font-size="13.5" font-weight="400" fill="#5f4e60">
-      <tspan x="36" dy="0">Compact live-animated CPU & GPU usage gauges.</tspan><tspan x="36" dy="20">Dedicated 70% default power sliders (10%–100%) to prevent</tspan><tspan x="36" dy="20">thermal throttling and prolong battery runtime.</tspan>
+      <tspan x="36" dy="0">Compact live-animated CPU &amp; GPU usage gauges.</tspan><tspan x="36" dy="20">Dedicated 70% default power sliders (10%–100%) to prevent</tspan><tspan x="36" dy="20">thermal throttling and prolong battery runtime.</tspan>
     </text>
   </svg>

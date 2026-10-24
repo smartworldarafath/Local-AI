@@ -13,8 +13,8 @@
       </g>
       <g transform="translate(-18, -18) scale(1.5)"><path d="M20.38 8.57l-1.23 1.85a8 8 0 0 1-.22 7.58H5.07A8 8 0 0 1 15.58 6.85l1.85-1.23A10 10 0 0 0 3.35 19a2 2 0 0 0 1.72 1h13.85a2 2 0 0 0 1.74-1 10 10 0 0 0-.28-10.43zm-7.88 4.93a1.5 1.5 0 1 1 1-1.42 1.5 1.5 0 0 1-1 1.42zm2.74-6.41l-2.91 4.36a2.5 2.5 0 1 0-1.07.72l3.4-5.08h.58z" fill="#351500"/></g>
     </g>
-    <text x="114" y="47" font-family="system-ui, -apple-system, 'Google Sans', Roboto, sans-serif" font-size="32" font-weight="700" fill="#211824">Hardware & Performance</text>
-    <text x="114" y="74" font-family="system-ui, -apple-system, Roboto, sans-serif" font-size="15" font-weight="400" fill="#675466">Real-time CPU/GPU monitor, power limit sliders & 120Hz display timing</text>
+    <text x="114" y="47" font-family="system-ui, -apple-system, 'Google Sans', Roboto, sans-serif" font-size="32" font-weight="700" fill="#211824">Hardware &amp; Performance</text>
+    <text x="114" y="74" font-family="system-ui, -apple-system, Roboto, sans-serif" font-size="15" font-weight="400" fill="#675466">Real-time CPU/GPU monitor, power limit sliders &amp; 120Hz display timing</text>
     <g transform="translate(904, 36)">
         <rect width="66" height="32" rx="16" fill="#ddcedd"/>
         <text x="33" y="20.5" font-family="system-ui, -apple-system, Roboto, sans-serif" font-size="13" font-weight="700" fill="#221824" text-anchor="middle">120Hz</text>

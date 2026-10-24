@@ -1,5 +1,18 @@
 <div align="center">
 
+<p align="center">
+  <img src="docs/LastChat_icon.png" alt="Local AI" width="132" />
+</p>
+
+# Local AI
+
+<p align="center">
+  <b>An open-source, on-device AI assistant for Android</b><br/>
+  Material 3 Expressive UI · multi-provider model routing · local RAG memory · PRoot Linux tool sandbox · a web UI you open from any browser on your Wi-Fi.
+</p>
+
+<br>
+
 <picture>
   <source media="(prefers-color-scheme: dark) and (max-width: 640px)" srcset="assets/readme/dark/hm-hero.svg">
   <source media="(prefers-color-scheme: dark)" srcset="assets/readme/dark/hero.svg">
@@ -29,6 +42,37 @@
 
 </div>
 
+
+
+---
+
+<div align="center">
+
+## 📸 A quick look
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="docs/1.4.3_chat.jpg" alt="Chat with tools and reasoning" width="240" /><br/>
+      <sub><b>Chat</b> — reasoning timer, tool badges, rendered SVG answer</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/1.4.3_memory.jpg" alt="Memory settings" width="240" /><br/>
+      <sub><b>Memory</b> — memory modes, RAG retrieval, memory search tool</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/1.4.3_stats.jpg" alt="Statistics" width="240" /><br/>
+      <sub><b>Statistics</b> — activity heatmap, conversations, tokens</sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center"><sub>More screenshots per release live in <a href="docs/"><code>docs/</code></a>, including provider setup walkthroughs (<code>1.1.6_providers_use.gif</code>, <code>1.3.4_providers_use.gif</code>).</sub></p>
+
+</div>
+
+---
+
 <h3 id="overview"><picture><source media="(prefers-color-scheme: dark) and (max-width: 640px)" srcset="assets/readme/dark/hm-overview.svg"><source media="(prefers-color-scheme: dark)" srcset="assets/readme/dark/h-overview.svg"><source media="(max-width: 640px)" srcset="assets/readme/light/hm-overview.svg"><img src="assets/readme/light/h-overview.svg" alt="Overview: Privacy-first on-device AI assistant with Linux sandbox & Material 3 Expressive" width="100%"></picture></h3>
 
 **Local AI** is a state-of-the-art, open-source AI assistant application for Android engineered around **Google's Material 3 Expressive** design system. 
@@ -51,6 +95,18 @@ All conversations, API keys, documents, vector embeddings, and tool executions r
 <tr><td><b>License</b></td><td>GNU General Public License v3.0 (GPL-3.0)</td></tr>
 </tbody></table>
 
+#### 💡 What you can actually do with it
+
+| I want to… | Local AI does it with… |
+| :--- | :--- |
+| **Chat with GPT / Claude / Gemini / DeepSeek / Ollama** | One assistant definition, per-assistant model choice, 62 provider presets in the bundled catalog, plus custom OpenAI-compatible endpoints |
+| **Keep long-term context without cloud memory** | Local RAG memory: episodic chunks embedded by an embedding model you pick, stored on device, recalled by cosine similarity |
+| **Ask a model to do tasks on my phone** | Built-in tools: `eval_javascript`, `text_to_speech`, `generate_image`, `send_notification`, `schedule_message`, `get_notifications`, `search_memory`, `manage_skills`, `ask_user` |
+| **Run Python, a package manager or shell scripts** | The `:workspace` module installs a PRoot Linux rootfs and exposes `workspace_shell`, `workspace_read_file`, `workspace_write_file`, `workspace_edit_file` — no root required |
+| **Use custom MCP servers** | Built-in Model Context Protocol (MCP) client with SSE and Streamable-HTTP transports |
+| **Chat from laptop while phone does the work** | Embedded Ktor server + React Router SPA + JWT auth + SSE streaming, advertised over mDNS on the LAN |
+| **Read PDF / Word / Images and ask questions** | MuPDF engine, DOCX→Markdown parser, OCR transformer, image/audio attachments, multimodal vision models |
+
 <div align="center">
 
 <a href="https://github.com/smartworldarafath/Local-AI/issues"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/dark/btn-issues.svg"><img src="assets/readme/light/btn-issues.svg" alt="Report an issue" height="50"></picture></a>
@@ -70,6 +126,31 @@ All conversations, API keys, documents, vector embeddings, and tool executions r
 | <a href="#features" title="Local RAG & Vector Memory"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/dark/card-rag.svg"><img src="assets/readme/light/card-rag.svg" alt="Local RAG & Vector Memory" width="430"></picture></a> | <a href="#features" title="Linux PRoot Workspace"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/dark/card-proot.svg"><img src="assets/readme/light/card-proot.svg" alt="Linux PRoot Workspace" width="430"></picture></a> |
 | <a href="#hardware" title="Real-Time Hardware Monitor"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/dark/card-hardware.svg"><img src="assets/readme/light/card-hardware.svg" alt="Real-Time Hardware Monitor" width="430"></picture></a> | <a href="#features" title="Multimodal Vision & Voice"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/dark/card-multimodal.svg"><img src="assets/readme/light/card-multimodal.svg" alt="Multimodal Vision & Voice" width="430"></picture></a> |
 | <a href="#updates" title="Smart In-App Updates"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/dark/card-updates.svg"><img src="assets/readme/light/card-updates.svg" alt="Smart In-App Updates" width="430"></picture></a> | <a href="#faq" title="100% Zero-Leak Privacy"><picture><source media="(prefers-color-scheme: dark)" srcset="assets/readme/dark/card-privacy.svg"><img src="assets/readme/light/card-privacy.svg" alt="100% Zero-Leak Privacy" width="430"></picture></a> |
+
+</div>
+
+<h3 id="showcase"><picture><source media="(prefers-color-scheme: dark) and (max-width: 640px)" srcset="assets/readme/dark/hm-overview.svg"><source media="(prefers-color-scheme: dark)" srcset="assets/readme/dark/h-overview.svg"><source media="(max-width: 640px)" srcset="assets/readme/light/hm-overview.svg"><img src="assets/readme/light/h-overview.svg" alt="App Showcase & Screenshots" width="100%"></picture></h3>
+
+<div align="center">
+
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="docs/1.4.3_chat.jpg" alt="Chat with tools and reasoning" width="240" /><br/>
+      <sub><b>Chat</b> — reasoning timer, tool badges, rendered SVG answer</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/1.4.3_memory.jpg" alt="Memory settings" width="240" /><br/>
+      <sub><b>Memory</b> — memory modes, RAG retrieval, memory search tool</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/1.4.3_stats.jpg" alt="Statistics" width="240" /><br/>
+      <sub><b>Statistics</b> — activity heatmap, conversations, tokens</sub>
+    </td>
+  </tr>
+</table>
+
+<sub>More walkthroughs and animated setup demos are in [`docs/`](docs), including <code>1.1.6_providers_use.gif</code> and <code>1.3.4_providers_use.gif</code>.</sub>
 
 </div>
 

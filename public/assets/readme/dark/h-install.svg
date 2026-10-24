@@ -13,7 +13,7 @@
       </g>
       <g transform="translate(-18, -18) scale(1.5)"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" fill="#FFFFFF"/></g>
     </g>
-    <text x="114" y="47" font-family="system-ui, -apple-system, 'Google Sans', Roboto, sans-serif" font-size="32" font-weight="700" fill="#ffffff">Installation & Setup</text>
+    <text x="114" y="47" font-family="system-ui, -apple-system, 'Google Sans', Roboto, sans-serif" font-size="32" font-weight="700" fill="#ffffff">Installation &amp; Setup</text>
     <text x="114" y="74" font-family="system-ui, -apple-system, Roboto, sans-serif" font-size="15" font-weight="400" fill="#cbb4ca">Build from source with Gradle or install the standalone universal APK</text>
     <g transform="translate(904, 36)">
         <rect width="66" height="32" rx="16" fill="#3d2e3f"/>
