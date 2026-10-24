@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Local AI - Material 3 Expressive README Asset Gallery</title>
+  <style>
+    :root {
+      --bg: #140d16;
+      --card-bg: #1f1722;
+      --text: #f0e3ef;
+      --subtext: #cbb4ca;
+      --border: #382a3b;
+      --accent: #d0bcff;
+    }
+    body.light {
+      --bg: #faf2fa;
+      --card-bg: #ffffff;
+      --text: #211824;
+      --subtext: #675466;
+      --border: #e0d0df;
+      --accent: #6750a4;
+    }
+    body {
+      margin: 0;
+      padding: 32px 20px;
+      font-family: system-ui, -apple-system, 'Google Sans', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      transition: background 0.3s, color 0.3s;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+    }
+    .header-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 28px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .theme-toggle {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 20px;
+      border-radius: 9999px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 14px;
+      transition: transform 0.15s;
+    }
+    .theme-toggle:active {
+      transform: scale(0.96);
+    }
+    section {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      padding: 28px;
+      margin-bottom: 28px;
+    }
+    h2 {
+      margin-top: 0;
+      margin-bottom: 16px;
+      font-size: 20px;
+      color: var(--accent);
+    }
+    .grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      align-items: center;
+    }
+    .banner-preview {
+      width: 100%;
+      overflow-x: auto;
+      margin-bottom: 16px;
+    }
+    .banner-preview img {
+      max-width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 52px;
+    }
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+      gap: 16px;
+    }
+    .card-grid img {
+      width: 100%;
+      height: auto;
+      border-radius: 32px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header-bar">
+      <div>
+        <h1 style="margin:0; font-size: 28px;">Local AI · M3 Expressive SVGs</h1>
+        <p style="margin:4px 0 0 0; color:var(--subtext);">Google Pixel 12-petal rotating flower components with GitHub-safe SMIL animations</p>
+      </div>
+      <button class="theme-toggle" onclick="document.body.classList.toggle('light')">🌓 Switch Light / Dark</button>
+    </div>
+
+    <section>
+      <h2>Action Buttons (216x68 Pill)</h2>
+      <div class="grid">
+        <img class="theme-img" data-dark="assets/readme/dark/btn-download.svg" data-light="assets/readme/light/btn-download.svg" alt="Download">
+        <img class="theme-img" data-dark="assets/readme/dark/btn-github.svg" data-light="assets/readme/light/btn-github.svg" alt="GitHub">
+        <img class="theme-img" data-dark="assets/readme/dark/btn-sponsor.svg" data-light="assets/readme/light/btn-sponsor.svg" alt="Support">
+        <img class="theme-img" data-dark="assets/readme/dark/btn-issues.svg" data-light="assets/readme/light/btn-issues.svg" alt="Issues">
+        <img class="theme-img" data-dark="assets/readme/dark/btn-releases.svg" data-light="assets/readme/light/btn-releases.svg" alt="Releases">
+        <img class="theme-img" data-dark="assets/readme/dark/btn-license.svg" data-light="assets/readme/light/btn-license.svg" alt="License">
+      </div>
+    </section>
+
+    <section>
+      <h2>Badges (28px Pill)</h2>
+      <div class="grid">
+        <img class="theme-img" data-dark="assets/readme/dark/badge-android.svg" data-light="assets/readme/light/badge-android.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/badge-privacy.svg" data-light="assets/readme/light/badge-privacy.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/badge-m3e.svg" data-light="assets/readme/light/badge-m3e.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/badge-proot.svg" data-light="assets/readme/light/badge-proot.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/badge-zerotelemetry.svg" data-light="assets/readme/light/badge-zerotelemetry.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/badge-multimodal.svg" data-light="assets/readme/light/badge-multimodal.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/badge-gpl.svg" data-light="assets/readme/light/badge-gpl.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/badge-prs.svg" data-light="assets/readme/light/badge-prs.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/badge-kotlin.svg" data-light="assets/readme/light/badge-kotlin.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/badge-compose.svg" data-light="assets/readme/light/badge-compose.svg">
+      </div>
+    </section>
+
+    <section>
+      <h2>Header Banners (1000x104)</h2>
+      <div class="banner-preview"><img class="theme-img" data-dark="assets/readme/dark/h-overview.svg" data-light="assets/readme/light/h-overview.svg"></div>
+      <div class="banner-preview"><img class="theme-img" data-dark="assets/readme/dark/h-features.svg" data-light="assets/readme/light/h-features.svg"></div>
+      <div class="banner-preview"><img class="theme-img" data-dark="assets/readme/dark/h-architecture.svg" data-light="assets/readme/light/h-architecture.svg"></div>
+      <div class="banner-preview"><img class="theme-img" data-dark="assets/readme/dark/h-hardware.svg" data-light="assets/readme/light/h-hardware.svg"></div>
+      <div class="banner-preview"><img class="theme-img" data-dark="assets/readme/dark/h-updates.svg" data-light="assets/readme/light/h-updates.svg"></div>
+      <div class="banner-preview"><img class="theme-img" data-dark="assets/readme/dark/h-install.svg" data-light="assets/readme/light/h-install.svg"></div>
+      <div class="banner-preview"><img class="theme-img" data-dark="assets/readme/dark/h-faq.svg" data-light="assets/readme/light/h-faq.svg"></div>
+      <div class="banner-preview"><img class="theme-img" data-dark="assets/readme/dark/h-support.svg" data-light="assets/readme/light/h-support.svg"></div>
+    </section>
+
+    <section>
+      <h2>Bento Grid Feature Cards (430x218)</h2>
+      <div class="card-grid">
+        <img class="theme-img" data-dark="assets/readme/dark/card-m3e.svg" data-light="assets/readme/light/card-m3e.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/card-providers.svg" data-light="assets/readme/light/card-providers.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/card-rag.svg" data-light="assets/readme/light/card-rag.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/card-proot.svg" data-light="assets/readme/light/card-proot.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/card-hardware.svg" data-light="assets/readme/light/card-hardware.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/card-multimodal.svg" data-light="assets/readme/light/card-multimodal.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/card-updates.svg" data-light="assets/readme/light/card-updates.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/card-privacy.svg" data-light="assets/readme/light/card-privacy.svg">
+      </div>
+    </section>
+
+    <section>
+      <h2>Tech Stack Pills (42px)</h2>
+      <div class="grid">
+        <img class="theme-img" data-dark="assets/readme/dark/pill-kotlin.svg" data-light="assets/readme/light/pill-kotlin.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/pill-compose.svg" data-light="assets/readme/light/pill-compose.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/pill-m3e.svg" data-light="assets/readme/light/pill-m3e.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/pill-koin.svg" data-light="assets/readme/light/pill-koin.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/pill-room.svg" data-light="assets/readme/light/pill-room.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/pill-ktor.svg" data-light="assets/readme/light/pill-ktor.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/pill-okhttp.svg" data-light="assets/readme/light/pill-okhttp.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/pill-proot.svg" data-light="assets/readme/light/pill-proot.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/pill-mupdf.svg" data-light="assets/readme/light/pill-mupdf.svg">
+        <img class="theme-img" data-dark="assets/readme/dark/pill-react.svg" data-light="assets/readme/light/pill-react.svg">
+      </div>
+    </section>
+  </div>
+
+  <script>
+    function updateImages() {
+      const isLight = document.body.classList.contains('light');
+      document.querySelectorAll('.theme-img').forEach(img => {
+        const src = isLight ? img.dataset.light : img.dataset.dark;
+        if (src) img.src = src;
+      });
+    }
+    const observer = new MutationObserver(updateImages);
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    updateImages();
+  </script>
+</body>
+</html>

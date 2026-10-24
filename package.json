@@ -1,0 +1,19 @@
+{
+  "name": "local-ai",
+  "version": "1.2.0",
+  "description": "Privacy-First On-Device AI Assistant for Android with Material 3 Expressive & Linux PRoot Workspace",
+  "private": true,
+  "scripts": {
+    "assets": "node scripts/generate-pixel-assets.js"
+  },
+  "keywords": [
+    "android",
+    "local-ai",
+    "material-3-expressive",
+    "proot",
+    "jetpack-compose",
+    "kotlin"
+  ],
+  "author": "Arafath <arafathrahman711@gmail.com>",
+  "license": "GPL-3.0"
+}
