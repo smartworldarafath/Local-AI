@@ -11,19 +11,22 @@ import okhttp3.Request
 import okhttp3.Response
 import kotlin.io.encoding.Base64
 
-class AIRequestInterceptor(private val remoteConfig: FirebaseRemoteConfig) : Interceptor {
+class AIRequestInterceptor(private val remoteConfig: FirebaseRemoteConfig?) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         var request = chain.request()
         val host = request.url.host
 
-        if (host == "api.siliconflow.cn") {
-            request = processSiliconCloudRequest(request)
+        if (host == "api.siliconflow.cn" && remoteConfig != null) {
+            request = processSiliconCloudRequest(request, remoteConfig)
         }
 
         return chain.proceed(request)
     }
 
-    private fun processSiliconCloudRequest(request: Request): Request {
+    private fun processSiliconCloudRequest(
+        request: Request,
+        remoteConfig: FirebaseRemoteConfig,
+    ): Request {
         val bodyJson = request.readBodyAsJson()
         val model = bodyJson?.jsonObject["model"]?.jsonPrimitiveOrNull?.content
         val freeModels = remoteConfig.getString("silicon_cloud_free_models").split(",")

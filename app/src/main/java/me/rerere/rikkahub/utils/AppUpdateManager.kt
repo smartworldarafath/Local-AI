@@ -91,12 +91,10 @@ class AppUpdateManager(
     }
 
     private fun cleanVersionParts(version: String): List<Int> {
-        val cleaned = version.lowercase()
-            .removePrefix("v")
-            .removePrefix("release")
-            .trim()
-        val parts = cleaned.split(".", "-", "_")
-        return parts.mapNotNull { it.toIntOrNull() }
+        return Regex("\\d+")
+            .findAll(version)
+            .mapNotNull { it.value.toIntOrNull() }
+            .toList()
     }
 
     private fun getUpdateFile(cleanVersion: String): File {

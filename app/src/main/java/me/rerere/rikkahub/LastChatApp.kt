@@ -106,13 +106,15 @@ class LastChatApp : Application(), SingletonImageLoader.Factory {
         deleteTempFiles()
 
         // Init remote config
-        runCatching {
-            get<FirebaseRemoteConfig>().apply {
-                setConfigSettingsAsync(remoteConfigSettings {
-                    minimumFetchIntervalInSeconds = 1800
-                })
-                setDefaultsAsync(R.xml.remote_config_defaults)
-                fetchAndActivate()
+        if (com.google.firebase.FirebaseApp.getApps(this).isNotEmpty()) {
+            runCatching {
+                get<FirebaseRemoteConfig>().apply {
+                    setConfigSettingsAsync(remoteConfigSettings {
+                        minimumFetchIntervalInSeconds = 1800
+                    })
+                    setDefaultsAsync(R.xml.remote_config_defaults)
+                    fetchAndActivate()
+                }
             }
         }
 
@@ -237,7 +239,9 @@ class LastChatApp : Application(), SingletonImageLoader.Factory {
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             if (isHazeDetachedCoordinateCrash(throwable)) {
                 Log.w(TAG, "Suppressed Haze LayoutCoordinate crash after detach", throwable)
-                runCatching { get<FirebaseCrashlytics>().recordException(throwable) }
+                if (com.google.firebase.FirebaseApp.getApps(this@LastChatApp).isNotEmpty()) {
+                    runCatching { get<FirebaseCrashlytics>().recordException(throwable) }
+                }
                 return@setDefaultUncaughtExceptionHandler
             }
             previous?.uncaughtException(thread, throwable)

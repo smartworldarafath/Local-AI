@@ -84,8 +84,8 @@ android {
         applicationId = "lastchat.rikkafork.cocolal"
         minSdk = 28
         targetSdk = 36
-        versionCode = 42
-        versionName = "1.3.0"
+        versionCode = 43
+        versionName = "1.3.2 (beta)"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -223,7 +223,12 @@ android {
             this as com.android.build.gradle.internal.api.ApkVariantOutputImpl
 
             val variantName = baseName
-            val apkName = "LocalAI_" + defaultConfig.versionName + "_" + variantName + ".apk"
+            val safeVersion = defaultConfig.versionName
+                ?.replace(" ", "-")
+                ?.replace("(", "")
+                ?.replace(")", "")
+                ?: "1.3.2"
+            val apkName = "LocalAI_" + safeVersion + "_" + variantName + ".apk"
 
             outputFileName = apkName
         }

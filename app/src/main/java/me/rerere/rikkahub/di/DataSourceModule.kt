@@ -270,7 +270,15 @@ val dataSourceModule = module {
                     .build()
                 chain.proceed(request)
             }
-            .addInterceptor(AIRequestInterceptor(remoteConfig = get()))
+            .addInterceptor(
+                AIRequestInterceptor(
+                    remoteConfig = if (com.google.firebase.FirebaseApp.getApps(get()).isNotEmpty()) {
+                        runCatching { get<com.google.firebase.remoteconfig.FirebaseRemoteConfig>() }.getOrNull()
+                    } else {
+                        null
+                    }
+                )
+            )
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.HEADERS
             })

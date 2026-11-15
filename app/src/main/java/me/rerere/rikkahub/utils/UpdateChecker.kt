@@ -22,7 +22,7 @@ import me.rerere.common.platform.PlatformHttpRequest
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 
-private const val GITHUB_API_URL = "https://api.github.com/repos/Cocolalilal/LastChat/releases/latest"
+private const val GITHUB_API_URL = "https://api.github.com/repos/smartworldarafath/Local-AI/releases?per_page=10"
 
 class UpdateChecker(private val client: PlatformHttpClient) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -56,12 +56,15 @@ class UpdateChecker(private val client: PlatformHttpClient) {
                             url = GITHUB_API_URL,
                             headers = mapOf(
                                 "Accept" to "application/vnd.github+json",
-                                "User-Agent" to "LastChat ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}"
+                                "User-Agent" to "LocalAI ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}"
                             )
                         )
                     )
                     if (response.statusCode in 200..299) {
-                        val release = json.decodeFromString<GitHubRelease>(response.body.decodeToString())
+                        val releases = json.decodeFromString<List<GitHubRelease>>(response.body.decodeToString())
+                        val release = releases.firstOrNull { !it.draft && it.assets.any { a -> a.name.endsWith(".apk") } }
+                            ?: releases.firstOrNull { !it.draft }
+                            ?: throw Exception("No releases found")
                         
                         // Convert GitHub release to UpdateInfo
                         val arch = getDeviceArchitecture()
@@ -240,9 +243,11 @@ data class DownloadProgress(
 data class GitHubRelease(
     val tag_name: String,
     val name: String,
-    val body: String,
-    val published_at: String,
-    val assets: List<GitHubAsset>
+    val body: String = "",
+    val published_at: String = "",
+    val draft: Boolean = false,
+    val prerelease: Boolean = false,
+    val assets: List<GitHubAsset> = emptyList()
 )
 
 @Serializable
@@ -277,8 +282,10 @@ value class Version(val value: String) : Comparable<Version> {
      * 将版本号分解为数字数组
      */
     private fun parseVersion(): List<Int> {
-        return value.split(".")
-            .map { it.toIntOrNull() ?: 0 }
+        return Regex("\\d+")
+            .findAll(value)
+            .mapNotNull { it.value.toIntOrNull() }
+            .toList()
     }
 
     /**
