@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -33,6 +34,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -47,6 +50,7 @@ import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -65,10 +69,14 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.ui.components.richtext.HighlightCodeBlock
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
+import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
+import me.rerere.rikkahub.ui.theme.AppShapes
 import me.rerere.rikkahub.ui.components.ui.Favicon
 import me.rerere.rikkahub.ui.components.ui.FaviconRow
 import me.rerere.rikkahub.ui.components.ui.FormItem
+import me.rerere.rikkahub.ui.components.ui.LastChatDestructiveConfirmDialog
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.modifier.lastChatSheetContainerColor
 import me.rerere.rikkahub.ui.modifier.shimmer
 import me.rerere.rikkahub.utils.JsonInstantPretty
 import me.rerere.rikkahub.utils.jsonPrimitiveOrNull
@@ -124,6 +132,7 @@ fun ToolCallItem(
                         "list_sandbox_files", "delete_sandbox_file", "import_attachment" -> Icons.Rounded.Terminal
                         "workspace_shell" -> Icons.Rounded.Terminal
                         "workspace_read_file", "workspace_write_file", "workspace_edit_file" -> Icons.Rounded.Description
+                        "workspace_view_image" -> Icons.Rounded.Image
                         in WORKSPACE_TOOLS -> Icons.Rounded.Computer
                         else -> Icons.Rounded.Build
                     },
@@ -177,6 +186,10 @@ fun ToolCallItem(
                             R.string.chat_message_tool_workspace_shell,
                             (arguments as? JsonObject)?.get("command")?.jsonPrimitiveOrNull?.contentOrNull ?: ""
                         )
+                        "workspace_view_image" -> stringResource(
+                            R.string.chat_message_tool_workspace_view_image,
+                            (arguments as? JsonObject)?.get("path")?.jsonPrimitiveOrNull?.contentOrNull ?: ""
+                        )
                         "import_attachment" -> stringResource(R.string.chat_message_tool_python_import)
                         else -> stringResource(
                             R.string.chat_message_tool_call_generic,
@@ -213,7 +226,8 @@ fun ToolCallItem(
                         )
                     }
                     val items = (content as? JsonObject)?.get("items")?.jsonArray ?: emptyList()
-                    if (items.isNotEmpty()) {
+                    val images = (content as? JsonObject)?.get("images")?.jsonArray ?: emptyList()
+                    if (items.isNotEmpty() || images.isNotEmpty()) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -224,8 +238,22 @@ fun ToolCallItem(
                                 },
                                 size = 18.dp,
                             )
+                            val resultLabel = buildString {
+                                if (items.isNotEmpty()) {
+                                    append(
+                                        stringResource(
+                                            R.string.chat_message_tool_search_results_count,
+                                            items.size
+                                        )
+                                    )
+                                }
+                                if (images.isNotEmpty()) {
+                                    if (isNotEmpty()) append(" · ")
+                                    append("${images.size} images")
+                                }
+                            }
                             Text(
-                                text = stringResource(R.string.chat_message_tool_search_results_count, items.size),
+                                text = resultLabel,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
                             )
@@ -312,13 +340,14 @@ private fun ToolCallPreviewSheet(
     val navController = LocalNavController.current
     val memoryRepo: MemoryRepository = koinInject()
     val scope = rememberCoroutineScope()
+    var pendingMemoryDeleteId by remember { mutableStateOf<Int?>(null) }
 
     // Check if this is a memory creation/update operation
     val isMemoryOperation = toolName in listOf("create_memory", "edit_memory")
     val memoryId = (content as? JsonObject)?.get("id")?.jsonPrimitiveOrNull?.intOrNull
 
     ModalBottomSheet(
-containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor = lastChatSheetContainerColor(),
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         onDismissRequest = {
             onDismissRequest()
@@ -342,8 +371,9 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
                         )
                         val contentObj = content as? JsonObject
                         val items = contentObj?.get("items")?.jsonArray ?: emptyList()
+                        val images = contentObj?.get("images")?.jsonArray ?: emptyList()
                         val answer = contentObj?.get("answer")?.jsonPrimitive?.contentOrNull
-                        if (items.isNotEmpty()) {
+                        if (items.isNotEmpty() || images.isNotEmpty() || !answer.isNullOrBlank()) {
                             LazyColumn(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -414,6 +444,54 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
                                                         alpha = 0.6f
                                                     )
                                                 )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (images.isNotEmpty()) {
+                                    item {
+                                        LazyRow(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            items(images.size, key = { index -> "search_image_$index" }) { index ->
+                                                val imageObj = images[index] as? JsonObject ?: return@items
+                                                val imageUrl = imageObj["url"]
+                                                    ?.jsonPrimitiveOrNull?.contentOrNull ?: return@items
+                                                val imageTitle = imageObj["title"]
+                                                    ?.jsonPrimitiveOrNull?.contentOrNull.orEmpty()
+                                                Card(
+                                                    shape = AppShapes.CardSmall,
+                                                    colors = CardDefaults.cardColors(
+                                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                                    )
+                                                ) {
+                                                    Column(
+                                                        modifier = Modifier.size(width = 160.dp, height = 160.dp)
+                                                    ) {
+                                                        ZoomableAsyncImage(
+                                                            model = imageUrl,
+                                                            contentDescription = imageTitle.ifBlank { null },
+                                                            modifier = Modifier
+                                                                .weight(1f)
+                                                                .fillMaxWidth()
+                                                                .clip(AppShapes.CardSmall),
+                                                            contentScale = ContentScale.Crop,
+                                                        )
+                                                        if (imageTitle.isNotBlank()) {
+                                                            Text(
+                                                                text = imageTitle,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis,
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                modifier = Modifier.padding(
+                                                                    horizontal = 8.dp,
+                                                                    vertical = 6.dp
+                                                                )
+                                                            )
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -670,16 +748,7 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
                             // 如果是memory操作，允许用户快速删除
                             if (isMemoryOperation && memoryId != null) {
                                 IconButton(
-                                    onClick = {
-                                        scope.launch {
-                                            try {
-                                                memoryRepo.deleteMemory(memoryId)
-                                                onDismissRequest()
-                                            } catch (e: Exception) {
-                                                // Handle error if needed
-                                            }
-                                        }
-                                    }
+                                    onClick = { pendingMemoryDeleteId = memoryId }
                                 ) {
                                     Icon(
                                         Icons.Rounded.Delete,
@@ -791,4 +860,21 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
             }
         },
     )
+
+    pendingMemoryDeleteId?.let { id ->
+        LastChatDestructiveConfirmDialog(
+            title = stringResource(R.string.chat_message_delete_memory_title),
+            consequence = stringResource(R.string.chat_message_delete_memory_consequence),
+            onDismiss = { pendingMemoryDeleteId = null },
+            onConfirm = {
+                pendingMemoryDeleteId = null
+                scope.launch {
+                    runCatching {
+                        memoryRepo.deleteMemory(id)
+                        onDismissRequest()
+                    }
+                }
+            },
+        )
+    }
 }

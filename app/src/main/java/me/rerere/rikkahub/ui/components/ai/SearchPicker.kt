@@ -53,15 +53,16 @@ import me.rerere.rikkahub.ui.context.LocalToaster
 import kotlinx.coroutines.launch
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.Model
+import me.rerere.rikkahub.ui.modifier.lastChatSheetContainerColor
+import me.rerere.rikkahub.ui.theme.AppShapes
 import me.rerere.rikkahub.ui.theme.LocalDarkMode
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.ai.models.ModelCatalogService
 import me.rerere.rikkahub.data.ai.models.ModelCatalogSnapshot
-import me.rerere.rikkahub.data.ai.models.searchProviderIconUri
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
-import me.rerere.rikkahub.ui.components.ui.AutoAIIconWithUrl
+import me.rerere.rikkahub.ui.components.ui.SearchProviderIcon
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.components.ui.ToggleSurface
@@ -143,9 +144,10 @@ fun SearchPickerButton(
                 // Show provider icon only when: search is on, NOT using built-in, and has a provider
                 if (enableSearch && !builtInSearchEnabled && currentService != null) {
                     val searchProviderName = SearchServiceOptions.TYPES[currentService::class] ?: "Search"
-                    AutoAIIconWithUrl(
+                    SearchProviderIcon(
                         name = searchProviderName,
-                        customIconUri = catalogSnapshot?.searchProviderIconUri(searchProviderName),
+                        service = currentService,
+                        catalogSnapshot = catalogSnapshot,
                         color = Color.Transparent
                     )
                 } else {
@@ -160,7 +162,7 @@ fun SearchPickerButton(
 
     if (showSearchPicker) {
         ModalBottomSheet(
-containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerLow,
+        containerColor = lastChatSheetContainerColor(),
             onDismissRequest = { showSearchPicker = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ) {
@@ -272,12 +274,12 @@ private fun AppSearchSettings(
     
     // Position-based corner shape calculator
     fun getItemShape(index: Int, totalCount: Int, isSelected: Boolean): RoundedCornerShape {
-        if (isSelected) return RoundedCornerShape(50) // Selected = fully round
+        if (isSelected) return AppShapes.ButtonPill
         return when {
-            totalCount == 1 -> RoundedCornerShape(24.dp) // Single item
-            index == 0 -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 10.dp, bottomEnd = 10.dp)
-            index == totalCount - 1 -> RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
-            else -> RoundedCornerShape(10.dp)
+            totalCount == 1 -> AppShapes.ListItem
+            index == 0 -> AppShapes.ListItemFirst
+            index == totalCount - 1 -> AppShapes.ListItemLast
+            else -> AppShapes.ListItemMiddle
         }
     }
     
@@ -292,7 +294,7 @@ private fun AppSearchSettings(
                 onToggleSearch = onToggleSearch,
                 onDismiss = onDismiss,
                 navBackStack = navBackStack,
-                shape = RoundedCornerShape(24.dp),
+                shape = AppShapes.ListItem,
                 isAmoled = isAmoled,
                 isDarkMode = isDarkMode
             )
@@ -304,7 +306,7 @@ private fun AppSearchSettings(
                 onToggleSearch = onToggleSearch,
                 onDismiss = onDismiss,
                 navBackStack = navBackStack,
-                shape = RoundedCornerShape(24.dp),
+                shape = AppShapes.ListItem,
                 isAmoled = isAmoled,
                 isDarkMode = isDarkMode
             )
@@ -378,8 +380,7 @@ private fun SearchToggleItem(
     isAmoled: Boolean,
     isDarkMode: Boolean
 ) {
-    // Use surfaceContainerHigh for Light Mode consistency
-    val containerColor = if (isDarkMode) Color.Black else MaterialTheme.colorScheme.surfaceContainerHigh
+    val containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
     val contentColor = MaterialTheme.colorScheme.onSurface
     
     Row(
@@ -455,10 +456,8 @@ private fun SearchProviderItem(
     // Animated colors for smooth selection transition
     val targetContainerColor = if (isSelected) {
         MaterialTheme.colorScheme.primaryContainer
-    } else if (isDarkMode) {
-        Color.Black
     } else {
-        MaterialTheme.colorScheme.surfaceContainerHigh
+        MaterialTheme.colorScheme.surfaceContainerHighest
     }
     val targetContentColor = if (isSelected) {
         MaterialTheme.colorScheme.onPrimaryContainer
@@ -491,9 +490,10 @@ private fun SearchProviderItem(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val searchProviderName = SearchServiceOptions.TYPES[service::class] ?: "Search"
-        AutoAIIconWithUrl(
+        SearchProviderIcon(
             name = searchProviderName,
-            customIconUri = catalogSnapshot?.searchProviderIconUri(searchProviderName),
+            service = service,
+            catalogSnapshot = catalogSnapshot,
             modifier = Modifier.size(24.dp)
         )
         Text(
@@ -514,7 +514,7 @@ private fun BuiltInSearchSetting(
     val isDarkMode = LocalDarkMode.current
     val isAmoled = amoledMode && isDarkMode
     
-    val containerColor = if (isDarkMode) Color.Black else MaterialTheme.colorScheme.surfaceContainerHigh
+    val containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
     val contentColor = if (isAmoled) Color.White else MaterialTheme.colorScheme.onSurface
 
     CompositionLocalProvider(LocalAbsoluteTonalElevation provides 0.dp) {

@@ -5,6 +5,8 @@ plugins {
 }
 
 kotlin {
+    jvmToolchain(17)
+
     androidTarget()
     listOf(
         iosArm64(),
@@ -29,6 +31,10 @@ kotlin {
         commonTest.dependencies {
             implementation(kotlin("test"))
         }
+        iosMain.dependencies {
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.darwin)
+        }
     }
 }
 
@@ -39,10 +45,4 @@ android {
     defaultConfig {
         minSdk = 26
     }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
 }
-

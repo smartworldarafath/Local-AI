@@ -33,6 +33,7 @@ import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.OpenAICompatibilityMode
 import me.rerere.ai.provider.ProviderProxy
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.selectProviderKey
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.MessageChunk
@@ -40,7 +41,9 @@ import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessageChoice
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.util.KeyOutcome
 import me.rerere.ai.util.KeyRoulette
+import me.rerere.ai.util.PooledKey
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.parseErrorDetail
@@ -53,6 +56,7 @@ import me.rerere.common.platform.PlatformHttpRequest
 import me.rerere.common.platform.PlatformServerEvent
 import me.rerere.common.platform.PlatformMediaEncoder
 import kotlin.time.Clock
+import kotlin.uuid.Uuid
 
 private const val TAG = "ChatCompletionsAPI"
 private const val LEADING_ASSISTANT_COMPATIBILITY_USER_PROMPT =
@@ -71,11 +75,15 @@ class ChatCompletionsAPI(
     private val keyRoulette: KeyRoulette,
     private val mediaEncoder: PlatformMediaEncoder,
 ) : OpenAIImpl {
+    private fun selectKey(providerSetting: ProviderSetting.OpenAI): PooledKey {
+        return keyRoulette.selectProviderKey(providerSetting)
+    }
+
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams,
-    ): MessageChunk = withContext(Dispatchers.IO) {
+    ): MessageChunk = withContext(me.rerere.ai.util.providerIoDispatcher) {
         val requestBody =
             buildChatCompletionRequest(
                 messages = messages,
@@ -87,21 +95,52 @@ class ChatCompletionsAPI(
 
         PlatformLog.i(TAG, "generateText: $encodedRequestBody")
 
+        val selectedKey = selectKey(providerSetting)
         val response = httpClient.execute(
             PlatformHttpRequest(
                 method = "POST",
                 url = "${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}",
                 headers = params.customHeaders.toHeaderMap()
-                    .withReferHeaders(providerSetting.baseUrl)
-                    .withAuthAndJson(keyRoulette.next(providerSetting.apiKey)),
+                    .withReferHeaders(providerSetting.baseUrl, params.sessionId)
+                    .withAuthAndJson(selectedKey.value),
                 body = encodedRequestBody.encodeToByteArray(),
                 mediaType = "application/json",
                 proxy = providerSetting.proxy.toPlatformProxy()
             )
         )
         if (response.statusCode !in 200..299) {
+            when (response.statusCode) {
+                401, 403 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.AuthFailure(
+                        statusCode = response.statusCode,
+                        keyName = selectedKey.name,
+                        providerId = providerSetting.id,
+                        providerName = providerSetting.name,
+                        errorMessage = response.body.decodeToString()
+                    )
+                )
+                402 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.QuotaExhausted(
+                        keyName = selectedKey.name,
+                        providerId = providerSetting.id,
+                        providerName = providerSetting.name,
+                        errorMessage = response.body.decodeToString()
+                    )
+                )
+                429 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.RateLimited()
+                )
+                in 500..599 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.Error(response.statusCode, temporary = true)
+                )
+            }
             throw Exception("Failed to get response: ${response.statusCode} ${response.body.decodeToString()}")
         }
+        keyRoulette.reportOutcome(selectedKey.id, KeyOutcome.Success)
 
         val bodyStr = response.body.decodeToString()
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
@@ -137,6 +176,16 @@ class ChatCompletionsAPI(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams,
+    ): Flow<MessageChunk> {
+        val selectedKey = selectKey(providerSetting)
+        return streamTextWithKey(providerSetting, messages, params, selectedKey)
+    }
+
+    private fun streamTextWithKey(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+        selectedKey: PooledKey,
     ): Flow<MessageChunk> = callbackFlow {
         val requestBody = buildChatCompletionRequest(
             messages = messages,
@@ -149,8 +198,8 @@ class ChatCompletionsAPI(
             method = "POST",
             url = "${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}",
             headers = params.customHeaders.toHeaderMap()
-                .withReferHeaders(providerSetting.baseUrl)
-                .withAuthAndJson(keyRoulette.next(providerSetting.apiKey)),
+                .withReferHeaders(providerSetting.baseUrl, params.sessionId)
+                .withAuthAndJson(selectedKey.value),
             body = encodedRequestBody.encodeToByteArray(),
             mediaType = "application/json",
             proxy = providerSetting.proxy.toPlatformProxy()
@@ -158,20 +207,59 @@ class ChatCompletionsAPI(
 
         PlatformLog.i(TAG, "streamText: $encodedRequestBody")
 
+        var hasEmittedChunk = false
         val job = launch {
             httpClient.streamEvents(request).collect { event ->
                 when (event) {
                     is PlatformServerEvent.Open -> Unit
-                    PlatformServerEvent.Closed -> close()
-                    is PlatformServerEvent.Failure -> close(parseStreamFailure(event))
+                    PlatformServerEvent.Closed -> {
+                        if (hasEmittedChunk) {
+                            keyRoulette.reportOutcome(selectedKey.id, KeyOutcome.Success)
+                        }
+                        close()
+                    }
+                    is PlatformServerEvent.Failure -> {
+                        when (event.statusCode) {
+                            401, 403 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.AuthFailure(
+                                    statusCode = event.statusCode ?: 401,
+                                    keyName = selectedKey.name,
+                                    providerId = providerSetting.id,
+                                    providerName = providerSetting.name,
+                                    errorMessage = event.body ?: event.message
+                                )
+                            )
+                            402 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.QuotaExhausted(
+                                    keyName = selectedKey.name,
+                                    providerId = providerSetting.id,
+                                    providerName = providerSetting.name,
+                                    errorMessage = event.body ?: event.message
+                                )
+                            )
+                            429 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.RateLimited()
+                            )
+                            in 500..599 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.Error(event.statusCode ?: 500, temporary = true)
+                            )
+                        }
+                        close(parseStreamFailure(event))
+                    }
                     is PlatformServerEvent.Event -> {
                         if (event.data == "[DONE]") {
+                            keyRoulette.reportOutcome(selectedKey.id, KeyOutcome.Success)
                             close()
                             return@collect
                         }
                         PlatformLog.d(TAG, "onEvent: ${event.data}")
                         try {
                             parseStreamData(event.data).forEach { chunk ->
+                                hasEmittedChunk = true
                                 trySend(chunk)
                             }
                         } catch (e: Throwable) {
@@ -414,15 +502,18 @@ class ChatCompletionsAPI(
 
                     else -> {
                         // OpenAI 官方
-                        // 文档中，只支持 "low", "medium", "high"
+                        // 支持 "none", "low", "medium", "high", "max"
                         if (level != ReasoningLevel.AUTO && level != ReasoningLevel.OFF) {
-                            put("reasoning_effort", if(level.effort == "minimal") "low" else level.effort)
+                            put("reasoning_effort", level.effort)
                         } else if (level == ReasoningLevel.OFF) {
                             // Suppress reasoning mode on local fast-tier LLMs (e.g. LM Studio, vLLM, Ollama)
                             // This acts as a Jinja template override for models like Qwen 3.5
                             put("chat_template_kwargs", buildJsonObject {
                                 put("enable_thinking", false)
                             })
+                            if (params.model.modelId.contains(Regex("gpt-5|gpt-4o|o[134]"))) {
+                                put("reasoning_effort", "none")
+                            }
                         }
                     }
                 }
@@ -464,30 +555,85 @@ class ChatCompletionsAPI(
         val shouldReplayDeepSeekReasoning = providerSetting.shouldReplayReasoningContent(host, modelId)
         val uploadableMessages = messages.filter { it.isValidToUpload() }
         val cacheBreakpointIndices = uploadableMessages.cacheBreakpointIndices(promptCachePolicy)
-        uploadableMessages
-            .forEachIndexed { index, message ->
-                if (message.role == MessageRole.TOOL) {
-                    val toolResults = message.getToolResults()
-                    toolResults.forEachIndexed { resultIndex, result ->
-                        add(buildJsonObject {
-                            put("role", "tool")
-                            put("name", result.toolName)
-                            put("tool_call_id", result.toolCallId)
-                            // Zhipu AI requires content to be a JSON object, not a string
-                            if (host == "open.bigmodel.cn") {
-                                put("content", result.content)
-                            } else {
-                                put("content", json.encodeToString(result.content))
+        var index = 0
+        while (index < uploadableMessages.size) {
+            val message = uploadableMessages[index]
+            if (message.role == MessageRole.TOOL) {
+                val toolMessages = mutableListOf<UIMessage>()
+                val messageIndices = mutableListOf<Int>()
+                while (index < uploadableMessages.size && uploadableMessages[index].role == MessageRole.TOOL) {
+                    toolMessages.add(uploadableMessages[index])
+                    messageIndices.add(index)
+                    index++
+                }
+                val allToolResults = toolMessages.flatMap { it.getToolResults() }
+                val hasAnyActiveImages = allToolResults.any { r -> r.inspectedImages.any { it.url.isNotBlank() } }
+                val shouldCacheMessage = messageIndices.any { it in cacheBreakpointIndices }
+                allToolResults.forEachIndexed { resultIndex, result ->
+                    add(buildJsonObject {
+                        put("role", "tool")
+                        put("name", result.toolName)
+                        put("tool_call_id", result.toolCallId)
+                        val contentText = if (result.content is JsonPrimitive && result.content.isString) {
+                            result.content.content
+                        } else {
+                            json.encodeToString(result.content)
+                        }
+                        if (host == "open.bigmodel.cn") {
+                            put("content", result.content)
+                        } else {
+                            put("content", contentText)
+                        }
+
+                        if (shouldCacheMessage && !hasAnyActiveImages && resultIndex == allToolResults.lastIndex) {
+                            put("cache_control", buildPromptCacheControl())
+                        }
+                    })
+                }
+                if (hasAnyActiveImages) {
+                    val provenanceLines = mutableListOf<String>()
+                    val encodedImages = mutableListOf<String>()
+                    allToolResults.forEach { result ->
+                        val activeImages = result.inspectedImages.filter { it.url.isNotBlank() }
+                        activeImages.forEachIndexed { imgIdx, img ->
+                            mediaEncoder.encodeImage(img.url).onSuccess { base64Url ->
+                                provenanceLines.add(me.rerere.ai.ui.buildToolImageProvenanceText(result, imgIdx + 1, img))
+                                encodedImages.add(base64Url)
+                            }.onFailure {
+                                PlatformLog.w(TAG, "encode tool image failed: ${img.sourceUrl ?: img.title}")
                             }
-                            
-                            val shouldCacheMessage = index in cacheBreakpointIndices
-                            if (shouldCacheMessage && resultIndex == toolResults.lastIndex) {
-                                put("cache_control", buildPromptCacheControl())
+                        }
+                    }
+                    if (encodedImages.isNotEmpty()) {
+                        val headerText = buildString {
+                            appendLine("[AUTOMATED TOOL VISUAL OUTPUT — NOT A USER MESSAGE | PRIVATE TO ASSISTANT]")
+                            appendLine("The following image(s) were returned by tool execution in this turn for your private visual inspection only. The user CANNOT see them and did NOT upload them. Do NOT refer to them as images the user sent. If the user should see an image, you MUST explicitly embed its markdown syntax (e.g. ![title](url)) in your reply; otherwise the user will see nothing.")
+                            provenanceLines.forEach { appendLine(it) }
+                        }.trim()
+                        add(buildJsonObject {
+                            put("role", "user")
+                            putJsonArray("content") {
+                                add(buildJsonObject {
+                                    put("type", "text")
+                                    put("text", headerText)
+                                    if (shouldCacheMessage) {
+                                        put("cache_control", buildPromptCacheControl())
+                                    }
+                                })
+                                encodedImages.forEach { dataUrl ->
+                                    add(buildJsonObject {
+                                        put("type", "image_url")
+                                        put("image_url", buildJsonObject {
+                                            put("url", dataUrl)
+                                        })
+                                    })
+                                }
                             }
                         })
                     }
-                    return@forEachIndexed
                 }
+                continue
+            }
                 add(buildJsonObject {
                     // role
                     put("role", JsonPrimitive(message.role.name.lowercase()))
@@ -610,6 +756,7 @@ class ChatCompletionsAPI(
                             })
                         }
                 })
+                index++
             }
     }
 
@@ -883,8 +1030,12 @@ private fun Map<String, String>.withAuthAndJson(apiKey: String): Map<String, Str
     )
 }
 
-private fun Map<String, String>.withReferHeaders(baseUrl: String): Map<String, String> {
-    return when (baseUrl.urlHostOrNull()) {
+private fun Map<String, String>.withReferHeaders(
+    baseUrl: String,
+    sessionId: String? = null,
+): Map<String, String> {
+    val host = baseUrl.urlHostOrNull()?.lowercase()
+    var headers = when (host) {
         "aihubmix.com" -> this + ("APP-Code" to "DKHA9468")
         "openrouter.ai" -> this + mapOf(
             "X-Title" to "LastChat",
@@ -892,6 +1043,13 @@ private fun Map<String, String>.withReferHeaders(baseUrl: String): Map<String, S
         )
         else -> this
     }
+    if (host == "opencode.ai" || host?.endsWith(".opencode.ai") == true) {
+        if (headers.keys.none { it.equals("x-opencode-session", ignoreCase = true) }) {
+            val session = sessionId?.trim()?.takeIf { it.isNotEmpty() } ?: Uuid.random().toString()
+            headers = headers + ("x-opencode-session" to session)
+        }
+    }
+    return headers
 }
 
 private fun ProviderProxy.toPlatformProxy(): PlatformHttpProxy? {

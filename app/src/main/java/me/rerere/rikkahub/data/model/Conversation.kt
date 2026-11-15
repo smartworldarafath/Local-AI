@@ -3,9 +3,12 @@ package me.rerere.rikkahub.data.model
 import android.net.Uri
 import androidx.core.net.toUri
 import kotlinx.serialization.Serializable
-import me.rerere.ai.core.MessageRole
+import me.rerere.ai.ui.MessageNode
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import me.rerere.ai.ui.currentVersionMessages
+import me.rerere.ai.ui.mergeCurrentVersionMessages
+import me.rerere.ai.ui.stripEphemeralToolImagePayloads
 import me.rerere.rikkahub.utils.InstantSerializer
 import me.rerere.rikkahub.data.datastore.DEFAULT_ASSISTANT_ID
 import java.time.Instant
@@ -81,15 +84,7 @@ data class Conversation(
      *  当前选中的 message
      */
     val currentMessages
-        get(): List<UIMessage> {
-            return messageNodes.mapNotNull { node ->
-                if (node.messages.isEmpty()) {
-                    null
-                } else {
-                    node.messages.getOrNull(node.selectIndex) ?: node.messages.first()
-                }
-            }
-        }
+        get(): List<UIMessage> = messageNodes.currentVersionMessages()
 
     fun getMessageNodeByMessage(message: UIMessage): MessageNode? {
         return getMessageNodeByMessageId(message.id)
@@ -101,55 +96,23 @@ data class Conversation(
     }
 
     fun updateCurrentMessages(messages: List<UIMessage>): Conversation {
-        val newNodes = this.messageNodes.toMutableList()
-        
-        // Get the versionTag from the active turn's last assistant node (if it exists)
-        // We only look past the most recent user message to avoid leaking tags from past turns
-        val activeVersionTag = this.messageNodes
-            .takeLastWhile { it.role != MessageRole.USER }
-            .lastOrNull { it.role == MessageRole.ASSISTANT }
-            ?.currentMessage?.versionTag
+        return this.copy(
+            messageNodes = messageNodes.mergeCurrentVersionMessages(messages)
+        )
+    }
 
-        messages.forEachIndexed { index, message ->
-            val node = newNodes.getOrNull(index)
-            val isNewGeneratedMessage = node == null || !node.messages.any { it.id == message.id }
-
-            // Propagate versionTag ONLY to new messages that don't have one
-            // This ensures tool results and newly spawned assistant nodes inherit the tag
-            val messageWithTag = if (isNewGeneratedMessage && activeVersionTag != null && message.versionTag == null) {
-                message.copy(versionTag = activeVersionTag)
+    fun stripEphemeralToolImagePayloads(): Conversation {
+        var changed = false
+        val newNodes = messageNodes.map { node ->
+            val stripped = node.messages.stripEphemeralToolImagePayloads()
+            if (stripped !== node.messages) {
+                changed = true
+                node.copy(messages = stripped)
             } else {
-                message
-            }
-            
-            val nodeToUse = newNodes
-                .getOrElse(index) { messageWithTag.toMessageNode() }
-
-            val newMessages = nodeToUse.messages.toMutableList()
-            var newMessageIndex = nodeToUse.selectIndex
-            if (newMessages.any { it.id == messageWithTag.id }) {
-                newMessages[newMessages.indexOfFirst { it.id == messageWithTag.id }] = messageWithTag
-            } else {
-                newMessages.add(messageWithTag)
-                newMessageIndex = newMessages.lastIndex
-            }
-
-            val newNode = nodeToUse.copy(
-                messages = newMessages,
-                selectIndex = newMessageIndex
-            )
-
-            // 更新newNodes
-            if (index > newNodes.lastIndex) {
-                newNodes.add(newNode)
-            } else {
-                newNodes[index] = newNode
+                node
             }
         }
-
-        return this.copy(
-            messageNodes = newNodes
-        )
+        return if (changed) copy(messageNodes = newNodes) else this
     }
 
     companion object {
@@ -163,80 +126,4 @@ data class Conversation(
             messageNodes = messages
         )
     }
-}
-
-@Serializable
-data class MessageNode(
-    val id: Uuid = Uuid.random(),
-    val messages: List<UIMessage>,
-    val selectIndex: Int = 0,
-    val forceTurnBreakBefore: Boolean = false,
-) {
-    val currentMessage get() = if (messages.isEmpty() || selectIndex !in messages.indices) {
-        if (messages.isNotEmpty()) {
-            messages[selectIndex.coerceIn(messages.indices)]
-        } else {
-            UIMessage(
-                role = MessageRole.USER,
-                parts = emptyList()
-            )
-        }
-    } else {
-        messages[selectIndex]
-    }
-
-    val role get() = messages.firstOrNull()?.role ?: MessageRole.USER
-    
-    @kotlinx.serialization.Transient
-    val cachedVersionSelectionIndices: List<Int> by lazy {
-        if (messages.isEmpty()) return@lazy emptyList()
-        val latestIndexByTag = linkedMapOf<String?, Int>()
-        messages.forEachIndexed { index, message ->
-            latestIndexByTag[message.versionTag] = index
-        }
-        latestIndexByTag.values.toList()
-    }
-
-    companion object {
-        fun of(
-            message: UIMessage,
-            forceTurnBreakBefore: Boolean = false,
-        ) = MessageNode(
-            messages = listOf(message),
-            selectIndex = 0,
-            forceTurnBreakBefore = forceTurnBreakBefore,
-        )
-    }
-}
-
-fun UIMessage.toMessageNode(): MessageNode {
-    return MessageNode(
-        messages = listOf(this),
-        selectIndex = 0
-    )
-}
-
-/**
- * Returns the canonical snapshot index for each user-visible message version.
- *
- * Multiple snapshots can share the same versionTag while a response streams or gets edited.
- * The selector should treat those as one version and point at the latest snapshot for that tag.
- */
-fun MessageNode.versionSelectionIndices(): List<Int> {
-    return this.cachedVersionSelectionIndices
-}
-
-fun MessageNode.versionSelectionPosition(selectedIndex: Int = selectIndex): Int {
-    if (messages.isEmpty()) return -1
-
-    val versionIndices = versionSelectionIndices()
-    val selectedTag = messages.getOrNull(selectedIndex)?.versionTag
-    val tagPosition = versionIndices.indexOfFirst { index ->
-        messages.getOrNull(index)?.versionTag == selectedTag
-    }
-    if (tagPosition >= 0) {
-        return tagPosition
-    }
-
-    return versionIndices.indexOf(selectedIndex)
 }

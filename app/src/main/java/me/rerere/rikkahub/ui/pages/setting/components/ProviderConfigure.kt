@@ -111,6 +111,9 @@ fun ProviderConfigure(
     modifier: Modifier = Modifier,
     showSavingIndicator: Boolean = false,
     showEnabledToggle: Boolean = true,
+    showProviderTypeSelector: Boolean = true,
+    enabledToggleEnabled: Boolean = true,
+    enabledSupportingText: String? = null,
     onEdit: (provider: ProviderSetting) -> Unit
 ) {
     val context = LocalContext.current
@@ -140,27 +143,35 @@ fun ProviderConfigure(
     ) {
         // 1. Enable/Disable Toggle with text
         if (showEnabledToggle) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (provider.enabled) {
-                        stringResource(id = R.string.setting_provider_page_enabled)
-                    } else {
-                        stringResource(id = R.string.setting_provider_page_disabled)
-                    },
-                    modifier = Modifier.weight(1f)
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (provider.enabled) {
+                            stringResource(id = R.string.setting_provider_page_enabled)
+                        } else {
+                            stringResource(id = R.string.setting_provider_page_disabled)
+                        },
+                    )
+                    enabledSupportingText?.let { supportingText ->
+                        Text(
+                            text = supportingText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 AutoSaveIndicator(visible = showSavingIndicator)
                 androidx.compose.foundation.layout.Spacer(modifier = Modifier.size(12.dp))
                 HapticSwitch(
                     checked = provider.enabled,
+                    enabled = enabledToggleEnabled,
                     onCheckedChange = { enabled ->
                         val updated = when (provider) {
                             is ProviderSetting.OpenAI -> provider.copy(enabled = enabled)
                             is ProviderSetting.Google -> provider.copy(enabled = enabled)
                             is ProviderSetting.Claude -> provider.copy(enabled = enabled)
                             is ProviderSetting.ComfyUI -> provider.copy(enabled = enabled)
+                            is ProviderSetting.LiteRtLocal -> provider.copy(enabled = enabled)
                         }
                         onEdit(updated)
                     }
@@ -171,7 +182,7 @@ fun ProviderConfigure(
         }
 
         // 2. Type selector (for non-built-in remote providers)
-        if (!provider.builtIn && provider !is ProviderSetting.ComfyUI) {
+        if (showProviderTypeSelector && !provider.builtIn && provider !is ProviderSetting.ComfyUI) {
             ProviderTypeSelector(
                 selectedType = provider::class,
                 onTypeSelected = { type ->
@@ -211,6 +222,7 @@ fun ProviderConfigure(
                         is ProviderSetting.Google -> provider.copy(name = newName)
                         is ProviderSetting.Claude -> provider.copy(name = newName)
                         is ProviderSetting.ComfyUI -> provider.copy(name = newName)
+                        is ProviderSetting.LiteRtLocal -> provider.copy(name = newName)
                     }
                     onEdit(updated)
                 },
@@ -238,6 +250,8 @@ fun ProviderConfigure(
             is ProviderSetting.ComfyUI -> {
                 ProviderConfigureComfyUI(provider, onEdit)
             }
+
+            is ProviderSetting.LiteRtLocal -> Unit // configured via the dedicated on-device screen
         }
     }
 }
@@ -350,6 +364,7 @@ fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): ProviderSettin
         is ProviderSetting.Google -> this.apiKey
         is ProviderSetting.Claude -> this.apiKey
         is ProviderSetting.ComfyUI -> ""
+        is ProviderSetting.LiteRtLocal -> ""
     }
 
     val sourceBaseUrl = when (this) {
@@ -380,6 +395,8 @@ fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): ProviderSettin
             customIconUri = this.customIconUri,
             builtIn = this.builtIn,
             apiKey = apiKey,
+            apiKeyPool = this.apiKeyPool,
+            keyPoolConfig = this.keyPoolConfig,
             baseUrl = convertedBaseUrl,
             chatCompletionsPath = if (this is ProviderSetting.OpenAI) this.chatCompletionsPath else ProviderSetting.OpenAI().chatCompletionsPath,
             useResponseApi = if (this is ProviderSetting.OpenAI) this.useResponseApi else false,
@@ -401,6 +418,8 @@ fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): ProviderSettin
             customIconUri = this.customIconUri,
             builtIn = this.builtIn,
             apiKey = apiKey,
+            apiKeyPool = this.apiKeyPool,
+            keyPoolConfig = this.keyPoolConfig,
             baseUrl = convertedBaseUrl,
             vertexAI = if (this is ProviderSetting.Google) this.vertexAI else false,
             privateKey = if (this is ProviderSetting.Google) this.privateKey else ProviderSetting.Google().privateKey,
@@ -420,6 +439,8 @@ fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): ProviderSettin
             customIconUri = this.customIconUri,
             builtIn = this.builtIn,
             apiKey = apiKey,
+            apiKeyPool = this.apiKeyPool,
+            keyPoolConfig = this.keyPoolConfig,
             baseUrl = convertedBaseUrl
         )
 
@@ -671,13 +692,10 @@ private fun ColumnScope.ProviderConfigureOpenAI(
     val latestProvider by rememberUpdatedState(provider)
     val toaster = LocalToaster.current
 
-    DebouncedTextField(
-        value = provider.apiKey,
-        onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
-        stateKey = "openai_api_key_${provider.id}",
-        label = stringResource(id = R.string.setting_provider_page_api_key),
-        modifier = Modifier.fillMaxWidth(),
-        isSecure = true
+    ApiKeyPoolButton(
+        provider = provider,
+        onEdit = { onEdit(it as ProviderSetting.OpenAI) },
+        modifier = Modifier.fillMaxWidth()
     )
 
     DebouncedTextField(
@@ -836,13 +854,10 @@ private fun ColumnScope.ProviderConfigureClaude(
 ) {
     val latestProvider by rememberUpdatedState(provider)
 
-    DebouncedTextField(
-        value = provider.apiKey,
-        onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
-        stateKey = "claude_api_key_${provider.id}",
-        label = stringResource(id = R.string.setting_provider_page_api_key),
-        modifier = Modifier.fillMaxWidth(),
-        isSecure = true
+    ApiKeyPoolButton(
+        provider = provider,
+        onEdit = { onEdit(it as ProviderSetting.Claude) },
+        modifier = Modifier.fillMaxWidth()
     )
 
     DebouncedTextField(
@@ -874,13 +889,10 @@ private fun ColumnScope.ProviderConfigureGoogle(
     }
 
     if (!provider.vertexAI) {
-        DebouncedTextField(
-            value = provider.apiKey,
-            onValueChange = { onEdit(provider.copy(apiKey = it.trim())) },
-            stateKey = "google_api_key_${provider.id}",
-            label = stringResource(id = R.string.setting_provider_page_api_key),
-            modifier = Modifier.fillMaxWidth(),
-            isSecure = true
+        ApiKeyPoolButton(
+            provider = provider,
+            onEdit = { onEdit(it as ProviderSetting.Google) },
+            modifier = Modifier.fillMaxWidth()
         )
 
         DebouncedTextField(

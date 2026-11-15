@@ -36,24 +36,29 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.rerere.ai.provider.Model
+import me.rerere.ai.context.ContextUsageBreakdown
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
 
 import me.rerere.rikkahub.R
+import me.rerere.rikkahub.data.ai.models.ModelMetadataResolver
 import me.rerere.rikkahub.data.datastore.ConversationContext
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.resolveConversationContext
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
+import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.replaceRegexes
 import me.rerere.rikkahub.data.repository.AppStorageRepository
 import me.rerere.rikkahub.data.repository.ChatAttachmentRepository
 import me.rerere.rikkahub.data.repository.ConversationRepository
+import me.rerere.rikkahub.data.repository.MemoryRepository
 import me.rerere.rikkahub.service.ChatPersistenceMode
 import me.rerere.rikkahub.service.ChatService
+import me.rerere.rikkahub.service.ContextManagementActivity
 import me.rerere.rikkahub.ui.hooks.writeStringPreference
 import me.rerere.rikkahub.utils.UiState
 import me.rerere.rikkahub.utils.UpdateChecker
@@ -76,13 +81,27 @@ class ChatVM(
     private val settingsStore: SettingsStore,
     private val conversationRepo: ConversationRepository,
     private val chatAttachmentRepository: ChatAttachmentRepository,
+    private val memoryRepository: MemoryRepository,
     private val chatService: ChatService,
     val updateChecker: UpdateChecker,
     private val appScope: me.rerere.rikkahub.AppScope,
     private val appStorageRepository: AppStorageRepository,
+    private val modelMetadataResolver: ModelMetadataResolver,
 ) : ViewModel() {
     private val _conversationId: Uuid = Uuid.parse(id)
     val conversation: StateFlow<Conversation> = chatService.getConversationFlow(_conversationId)
+    val assistantMemories: StateFlow<List<AssistantMemory>> = conversation
+        .map { current -> current.assistantId.toString() }
+        .distinctUntilChanged()
+        .flatMapLatest(memoryRepository::getCombinedMemoriesFlow)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val contextUsage: StateFlow<ContextUsageBreakdown?> = chatService.contextUsage
+        .map { usageByConversation -> usageByConversation[_conversationId] }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val contextManagementActivity: StateFlow<ContextManagementActivity?> =
+        chatService.contextManagementActivity
+            .map { activityByConversation -> activityByConversation[_conversationId] }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     private val _conversationInitialized = MutableStateFlow(false)
     val conversationInitialized: StateFlow<Boolean> = _conversationInitialized
     internal var chatListScrollPosition: ChatListScrollPosition? = null
@@ -302,6 +321,10 @@ class ChatVM(
     // 生成完成 (从ChatService获取)
     val generationDoneFlow: SharedFlow<Uuid> = chatService.generationDoneFlow
 
+    fun stopGeneration() {
+        chatService.stopGeneration(_conversationId)
+    }
+
     // MCP管理器 (从ChatService获取)
     val mcpManager = chatService.mcpManager
 
@@ -344,6 +367,49 @@ class ChatVM(
         updateConversationAssistant(
             assistant.copy(chatModelId = model.id)
         )
+    }
+
+    // 更新模型上下文限制
+    fun updateModelContextLimit(modelId: kotlin.uuid.Uuid, customLimitTokens: Int?) {
+        viewModelScope.launch {
+            settingsStore.update { current ->
+                val updatedProviders = current.providers.map { provider ->
+                    if (provider.models.any { it.id == modelId }) {
+                        val targetModel = provider.models.first { it.id == modelId }
+                        val resolvedCatalogModel = modelMetadataResolver.applyToModel(targetModel)
+                        val rawBase = targetModel.contextWindowTokens?.takeIf { it > 0 }
+                            ?: targetModel.maxInputTokens?.takeIf { it > 0 }
+                            ?: resolvedCatalogModel.contextWindowTokens?.takeIf { it > 0 }
+                            ?: resolvedCatalogModel.maxInputTokens?.takeIf { it > 0 }
+                            ?: 32_000
+
+                        val isCustom = customLimitTokens != null && customLimitTokens < rawBase
+                        val effectiveCustomLimit = if (isCustom) customLimitTokens else null
+
+                        val catalogCapacity = resolvedCatalogModel.contextWindowTokens?.takeIf { it > 0 }
+                        val restoredBaseCapacity = if (catalogCapacity != null && catalogCapacity > rawBase) {
+                            catalogCapacity
+                        } else {
+                            rawBase
+                        }
+
+                        val updatedModel = targetModel.copy(
+                            contextWindowTokens = restoredBaseCapacity,
+                            customContextLimitTokens = effectiveCustomLimit,
+                            contextLimitSource = if (effectiveCustomLimit != null) {
+                                me.rerere.ai.provider.ContextLimitSource.MANUAL
+                            } else {
+                                if (targetModel.contextLimitSource == me.rerere.ai.provider.ContextLimitSource.MANUAL) null else targetModel.contextLimitSource
+                            },
+                        )
+                        provider.editModel(updatedModel)
+                    } else {
+                        provider
+                    }
+                }
+                current.copy(providers = updatedProviders)
+            }
+        }
     }
 
     fun setSelectedAssistant(assistantId: Uuid) {
@@ -406,7 +472,14 @@ class ChatVM(
 
     fun applyRoutePersistenceMode(mode: ChatPersistenceMode?) {
         if (mode == null) return
-        chatService.ensureConversationPersistenceMode(_conversationId, mode)
+        viewModelScope.launch(Dispatchers.IO) {
+            val existsInDb = conversationRepo.getConversationById(_conversationId) != null
+            if (!existsInDb) {
+                chatService.ensureConversationPersistenceMode(_conversationId, mode)
+            } else {
+                chatService.ensureConversationPersistenceMode(_conversationId, ChatPersistenceMode.NORMAL)
+            }
+        }
     }
 
     fun handleMessageEdit(parts: List<UIMessagePart>, messageId: Uuid) {
@@ -468,7 +541,7 @@ class ChatVM(
         }
     }
 
-    suspend fun forkMessage(message: UIMessage): Conversation {
+    suspend fun forkMessage(message: UIMessage): Conversation? {
         return chatService.forkConversationAtMessage(_conversationId, message.id)
     }
 
@@ -485,54 +558,11 @@ class ChatVM(
         }
     }
 
-    /**
-     * Checks if regenerating this message will preserve version history (simple message)
-     * or wipe the old version (complex message with tool calls).
-     *
-     * A message is considered "simple" if the turn contains only:
-     * - Text/Thinking/Reasoning parts (no tool calls)
-     *
-     * A message is "complex" if the turn contains:
-     * - Any tool calls or tool results
-     *
-     * @return true if the turn is simple (can go back), false if complex (will wipe)
-     */
-    fun canPreserveVersionHistory(message: UIMessage): Boolean {
-        val currentMessages = conversation.value.messageNodes.map { it.currentMessage }
-
-        // Find the index of the message
-        val messageIndex = currentMessages.indexOfFirst { it.id == message.id }
-        if (messageIndex == -1) return false
-
-        // Find the start of the turn (last user message before this assistant message)
-        val lastUserIndex = currentMessages
-            .subList(0, messageIndex + 1)
-            .indexOfLast { it.role == me.rerere.ai.core.MessageRole.USER }
-
-        // Get all messages in this turn (from user to end of turn or next user)
-        val turnStart = if (lastUserIndex >= 0) lastUserIndex else 0
-        val turnEnd = currentMessages
-            .subList(messageIndex, currentMessages.size)
-            .indexOfFirst { it.role == me.rerere.ai.core.MessageRole.USER }
-            .let { if (it == -1) currentMessages.size else messageIndex + it }
-
-        // Check if any message in the turn has tool calls or tool results
-        for (i in turnStart until turnEnd) {
-            val msg = currentMessages[i]
-            if (msg.parts.any { it is UIMessagePart.ToolCall || it is UIMessagePart.ToolResult }) {
-                return false // Complex turn - cannot preserve version history
-            }
-        }
-
-        return true // Simple turn - can preserve version history
-    }
-
     fun regenerateAtMessage(
         message: UIMessage,
         regenerateAssistantMsg: Boolean = true,
-        forceWipe: Boolean = false
     ) {
-        chatService.regenerateAtMessage(_conversationId, message, regenerateAssistantMsg, forceWipe)
+        chatService.regenerateAtMessage(_conversationId, message, regenerateAssistantMsg)
     }
 
     fun saveConversationAsync() {
@@ -556,8 +586,8 @@ class ChatVM(
         chatService.deleteConversation(conversation)
     }
 
-    fun undoDeleteConversation(conversationId: Uuid) {
-        chatService.undoDeleteConversation(conversationId)
+    fun undoDeleteConversation(conversationId: Uuid): Boolean {
+        return chatService.undoDeleteConversation(conversationId)
     }
 
     fun updatePinnedStatus(conversation: Conversation) {
@@ -582,25 +612,6 @@ class ChatVM(
                 conversationRepo.getConversationById(conversation.id)
             } ?: return@launch
             chatService.generateTitle(conversation.id, conversationFull, force)
-        }
-    }
-
-    fun consolidateConversation(conversation: Conversation) {
-        viewModelScope.launch {
-            // Mark conversation as not consolidated so it will be picked up by the worker
-            withContext(Dispatchers.IO) {
-                conversationRepo.markAsNotConsolidated(conversation.id)
-            }
-            
-            // Trigger a consolidation run with specific conversation ID
-            val request = androidx.work.OneTimeWorkRequestBuilder<me.rerere.rikkahub.service.MemoryConsolidationWorker>()
-                .setInputData(
-                    androidx.work.workDataOf(
-                        "FORCE_CONVERSATION_ID" to conversation.id.toString()
-                    )
-                )
-                .build()
-            androidx.work.WorkManager.getInstance(context).enqueue(request)
         }
     }
 

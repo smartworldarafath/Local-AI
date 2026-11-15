@@ -4,8 +4,10 @@ import me.rerere.ai.provider.BalanceOption
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.rikkahub.data.ai.models.toCatalogIconUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -139,4 +141,5 @@ class ProviderConfigureConvertToTest {
         assertEquals(ModelType.IMAGE, comfy.models.single().type)
         assertEquals("model.safetensors", comfy.models.single().modelId)
     }
+
 }

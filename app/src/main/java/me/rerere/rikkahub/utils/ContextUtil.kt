@@ -14,7 +14,6 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -32,36 +31,6 @@ import kotlinx.coroutines.withContext
 import me.rerere.rikkahub.R
 
 private const val TAG = "ContextUtil"
-
-/**
- * Read clipboard data as text
- */
-fun Context.readClipboardText(): String {
-    val clipboardManager =
-        getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-    val clip = clipboardManager.primaryClip ?: return ""
-    val item = clip.getItemAt(0) ?: return ""
-    return item.text.toString()
-}
-
-/**
- * 发起添加群流程
- *
- * @param key 由官网生成的key
- * @return 返回true表示呼起手Q成功，返回false表示呼起失败
- */
-fun Context.joinQQGroup(key: String?): Boolean {
-    val intent = Intent(Intent.ACTION_VIEW)
-    intent.setData(("mqqopensdkapi://bizAgent/qm/qr?url=http%3A%2F%2Fqm.qq.com%2Fcgi-bin%2Fqm%2Fqr%3Ffrom%3Dapp%26p%3Dandroid%26jump_from%3Dwebapi%26k%3D$key").toUri())
-    // 此Flag可根据具体产品需要自定义，如设置，则在加群界面按返回，返回手Q主界面，不设置，按返回会返回到呼起产品界面    //intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    try {
-        startActivity(intent)
-        return true
-    } catch (e: java.lang.Exception) {
-        // 未安装手Q或安装的版本不支持
-        return false
-    }
-}
 
 /**
  * Write text into clipboard
@@ -87,6 +56,9 @@ fun Context.openUrl(url: String) {
         val intent = CustomTabsIntent.Builder()
             .setShowTitle(true)
             .build()
+        if (this !is Activity) {
+            intent.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
         intent.launchUrl(this, url.toUri())
     }.onFailure {
         it.printStackTrace()
@@ -141,17 +113,6 @@ fun Context.getActivity(): Activity? {
     return null
 }
 
-fun Context.getComponentActivity(): ComponentActivity? {
-    var context = this
-    while (context is ContextWrapper) {
-        if (context is ComponentActivity) {
-            return context
-        }
-        context = context.baseContext
-    }
-    return null
-}
-
 fun Context.exportImage(
     activity: Activity,
     bitmap: Bitmap,
@@ -184,7 +145,9 @@ fun Context.exportImage(
             val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
             uri?.let {
                 outputStream = contentResolver.openOutputStream(it)
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream!!)
+                val stream = outputStream
+                    ?: throw IllegalStateException("Failed to open MediaStore output stream")
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
             }
         } else {
             // Android 9及以下直接写入文件
@@ -239,7 +202,9 @@ fun Context.exportImageFile(
             val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
             uri?.let {
                 outputStream = contentResolver.openOutputStream(it)
-                file.inputStream().copyTo(outputStream!!)
+                val stream = outputStream
+                    ?: throw IllegalStateException("Failed to open MediaStore output stream")
+                file.inputStream().use { input -> input.copyTo(stream) }
             }
         } else {
             // Android 9及以下直接写入文件
@@ -258,33 +223,6 @@ fun Context.exportImageFile(
         Log.e(TAG, "Failed to save image file", e)
     } finally {
         outputStream?.close()
-    }
-}
-
-fun shareTextFile(context: Context, fileName: String, content: String) {
-    try {
-        val dir = context.cacheDir
-        val file = File(dir, fileName)
-        file.writeText(content)
-        // Ensure authority matches what is defined in AndroidManifest.xml
-        // Usually it is ${applicationId}.fileprovider
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/json"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(
-            Intent.createChooser(intent, context.getString(R.string.share_text_file_chooser_title))
-        )
-    } catch (e: Exception) {
-        e.printStackTrace()
-        Toast.makeText(
-            context,
-            context.getString(R.string.share_text_file_export_failed, e.message ?: ""),
-            Toast.LENGTH_SHORT
-        ).show()
     }
 }
 
@@ -391,7 +329,7 @@ suspend fun Context.saveToDownloads(uri: Uri, fileName: String) {
                 val dstUri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
                 if (dstUri != null) {
                     outputStream = contentResolver.openOutputStream(dstUri)
-                    inputStream.copyTo(outputStream!!)
+                    outputStream?.let { inputStream.copyTo(it) } ?: throw IllegalStateException("Failed to open output stream")
                     withContext(Dispatchers.Main) {
                         Toast.makeText(
                             this@saveToDownloads,
@@ -412,7 +350,7 @@ suspend fun Context.saveToDownloads(uri: Uri, fileName: String) {
                 val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                 val destFile = File(downloadsDir, fileName)
                 outputStream = destFile.sink().buffer().outputStream()
-                inputStream.copyTo(outputStream!!)
+                outputStream?.let { inputStream.copyTo(it) } ?: throw IllegalStateException("Failed to open output stream")
                 
                 // Notify media scanner
                 @Suppress("DEPRECATION")

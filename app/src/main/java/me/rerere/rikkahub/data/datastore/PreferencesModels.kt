@@ -5,6 +5,7 @@ import kotlinx.serialization.Transient
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.withInheritedCredentials
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.prompts.DEFAULT_LEARNING_MODE_PROMPT
@@ -23,6 +24,7 @@ import me.rerere.rikkahub.data.model.Mode
 import me.rerere.rikkahub.data.model.Skill
 import me.rerere.rikkahub.data.model.Tag
 import me.rerere.rikkahub.data.model.TextSelectionAction
+import me.rerere.rikkahub.data.model.AssistantOverlayConfig
 import me.rerere.rikkahub.data.model.TextSelectionConfig
 import me.rerere.rikkahub.data.sync.BackupCleanupResult
 import me.rerere.rikkahub.ui.theme.PresetThemes
@@ -118,14 +120,12 @@ data class Settings(
     val webServerJwtEnabled: Boolean = false,
     val webServerAccessPassword: String = "",
     val webServerBackgroundSetupShown: Boolean = false,
-    val consolidationWorkerIntervalMinutes: Int = 15,
-    val consolidationRequiresDeviceIdle: Boolean = false,
     val modes: List<Mode> = emptyList(),
     val lorebooks: List<Lorebook> = emptyList(),
     val skills: List<Skill> = emptyList(),
     val chatStorage: ChatStorageSettings = ChatStorageSettings(),
-    val dismissedBanners: Set<String> = emptySet(),
     val textSelectionConfig: TextSelectionConfig = TextSelectionConfig(),
+    val assistantOverlayConfig: AssistantOverlayConfig = AssistantOverlayConfig(),
 ) {
     companion object {
         fun dummy() = Settings(init = true)
@@ -259,9 +259,9 @@ data class DisplaySetting(
     val showModelName: Boolean = true,
     val showAssistantBubbles: Boolean = true,
     val showTokenUsage: Boolean = false,
+    val showContextTokenSummary: Boolean = true,
     val autoCloseThinking: Boolean = true,
     val reasoningPreviewEnabled: Boolean = false,
-    val showUpdates: Boolean = false,
     val checkForUpdates: Boolean = true,
     val showMessageJumper: Boolean = false,
     val messageJumperOnLeft: Boolean = false,
@@ -313,12 +313,101 @@ internal fun Settings.normalizeFontSettings(): Settings {
     return copy(displaySetting = displaySetting.normalizeFontSettings())
 }
 
+/**
+ * Advanced memory has one supported runtime shape: Core + Episodic retrieval with automatic
+ * consolidation. Older memory UIs could persist hidden combinations that excluded both stores or
+ * requested zero results; after the rollback those values had no visible control but still disabled
+ * every recall entry point.
+ */
+internal fun Settings.normalizeMemorySettings(): Settings = copy(
+    assistants = assistants.map { assistant ->
+        val finiteThreshold = assistant.ragSimilarityThreshold
+            .takeIf(Float::isFinite)
+            ?.coerceIn(0f, 1f)
+            ?: 0.45f
+        if (assistant.enableMemoryConsolidation) {
+            assistant.copy(
+                enableMemory = true,
+                useRagMemoryRetrieval = true,
+                enableRecentChatsReference = true,
+                ragIncludeCore = true,
+                ragIncludeEpisodes = true,
+                ragLimit = assistant.ragLimit.coerceAtLeast(1),
+                ragSimilarityThreshold = finiteThreshold,
+            )
+        } else {
+            assistant.copy(
+                ragLimit = assistant.ragLimit.coerceAtLeast(1),
+                ragSimilarityThreshold = finiteThreshold,
+            )
+        }
+    },
+)
+
 internal fun Settings.normalizeThemeId(): Settings {
     val normalizedThemeId = normalizePresetThemeId(themeId)
     return if (normalizedThemeId == themeId) {
         this
     } else {
         copy(themeId = normalizedThemeId)
+    }
+}
+
+/**
+ * The on-device ([ProviderSetting.LiteRtLocal]) provider is an ordinary, user-managed provider: it is
+ * NOT seeded by default and may be reordered or deleted like any other. This normalization only
+ * collapses accidental duplicates (all [ProviderSetting.LiteRtLocal] share one stable id) into the
+ * first occurrence, preserving its position and installed models. It never inserts one that is absent.
+ */
+internal fun Settings.normalizeLocalProvider(): Settings {
+    val locals = providers.filterIsInstance<ProviderSetting.LiteRtLocal>()
+    if (locals.size <= 1) return this
+    val kept = locals.first()
+    var seen = false
+    val normalized = providers.mapNotNull { provider ->
+        if (provider is ProviderSetting.LiteRtLocal) {
+            if (seen) null else {
+                seen = true
+                kept
+            }
+        } else provider
+    }
+    return if (normalized == providers) this else copy(providers = normalized)
+}
+
+/**
+ * Replaces the old Bing HTML scraper with Keyless (a router over free search backends) and
+ * turns search on for Generical when that migration happens.
+ */
+internal fun Settings.normalizeSearchServices(): Settings {
+    var convertedBing = false
+    val migratedServices = searchServices.map { service ->
+        if (service is SearchServiceOptions.BingLocalOptions) {
+            convertedBing = true
+            SearchServiceOptions.KeylessOptions(id = service.id)
+        } else {
+            service
+        }
+    }.ifEmpty { listOf(SearchServiceOptions.DEFAULT) }
+    val migratedAssistants = if (convertedBing) {
+        assistants.map { assistant ->
+            if (assistant.id == DEFAULT_ASSISTANT_ID && assistant.searchMode is AssistantSearchMode.Off) {
+                assistant.copy(searchMode = AssistantSearchMode.Provider(0))
+            } else {
+                assistant
+            }
+        }
+    } else {
+        assistants
+    }
+    return if (migratedServices == searchServices && migratedAssistants == assistants) {
+        this
+    } else {
+        copy(
+            searchServices = migratedServices,
+            assistants = migratedAssistants,
+            searchServiceSelected = searchServiceSelected.coerceIn(0, migratedServices.lastIndex),
+        )
     }
 }
 
@@ -399,6 +488,11 @@ fun Settings.resolveTextSelectionAssistant(): Assistant {
         ?: getCurrentAssistant()
 }
 
+fun Settings.resolveAssistantOverlayAssistant(): Assistant {
+    return assistantOverlayConfig.assistantId?.let { getAssistantById(it) }
+        ?: getCurrentAssistant()
+}
+
 fun Settings.findTextSelectionAction(actionId: String): TextSelectionAction? {
     return textSelectionConfig.actions.find { it.id == actionId }
 }
@@ -439,9 +533,13 @@ fun Settings.getAssistantById(id: Uuid): Assistant? {
 
 fun Settings.getEffectiveDisplaySetting(assistant: Assistant? = null): DisplaySetting {
     val ui = (assistant ?: getCurrentAssistant()).uiSettings
+    val effectiveShowModelIcon = ui.showAssistantAvatar ?: displaySetting.showModelIcon
     return displaySetting.copy(
         showUserAvatar = ui.showUserAvatar ?: displaySetting.showUserAvatar,
-        showModelIcon = ui.showAssistantAvatar ?: displaySetting.showModelIcon,
+        showModelIcon = effectiveShowModelIcon,
+        // The "Show character avatar and name" toggle controls both the avatar and the name;
+        // hiding the avatar also hides the character name.
+        showModelName = effectiveShowModelIcon && displaySetting.showModelName,
         showAssistantBubbles = ui.showAssistantBubbles ?: displaySetting.showAssistantBubbles,
         showTokenUsage = ui.showTokenUsage ?: displaySetting.showTokenUsage,
         autoCloseThinking = ui.autoCloseThinking ?: displaySetting.autoCloseThinking,
@@ -560,7 +658,7 @@ internal fun Settings.clearMissingModelReferences(): Settings {
     val allModelIds = allModels.map { it.id }.toSet()
     val chatFallback = allModels.firstOrNull { it.type == ModelType.CHAT }?.id ?: Uuid.random()
     val imageFallback = allModels.firstOrNull { it.type == ModelType.IMAGE }?.id ?: Uuid.random()
-    val embeddingFallback = allModels.firstOrNull { it.type == ModelType.EMBEDDING }?.id ?: Uuid.random()
+    val embeddingFallback = allModels.firstOrNull { it.type == ModelType.EMBEDDING }?.id ?: DISABLED_MODEL_ID
     val multimodalFallback = allModels.firstOrNull {
         it.type == ModelType.CHAT && it.inputModalities.contains(me.rerere.ai.provider.Modality.IMAGE)
     }?.id ?: chatFallback
@@ -604,6 +702,10 @@ internal fun Settings.clearMissingModelReferences(): Settings {
                 action.copy(modelId = action.modelId.ensureValidOrNull())
             }
         ),
+        assistantOverlayConfig = assistantOverlayConfig.copy(
+            assistantId = assistantOverlayConfig.assistantId?.takeIf { id -> updatedAssistants.any { it.id == id } },
+            modelId = assistantOverlayConfig.modelId.ensureValidOrNull(),
+        ),
     )
 }
 
@@ -614,7 +716,9 @@ fun Model.findProvider(
     val provider = findModelProviderFromList(providers) ?: return null
     val providerOverwrite = providerOverwrite
     if (checkOverwrite && providerOverwrite != null) {
-        return providerOverwrite.copyProvider(proxy = provider.proxy, models = emptyList())
+        return providerOverwrite
+            .copyProvider(proxy = provider.proxy, models = emptyList())
+            .withInheritedCredentials(provider)
     }
     return provider
 }
@@ -640,6 +744,7 @@ internal val DEFAULT_ASSISTANTS = listOf(
         temperature = 0.6f,
         uiSettings = me.rerere.rikkahub.data.model.AssistantUISettings(newChatShowAvatar = false),
         enableTimeAwareness = true,
+        searchMode = AssistantSearchMode.Provider(0),
         systemPrompt = """
             You are the best generic assistant, called {{char}}. {{char}} is a really nice guy. He doesn't use emojis though. Use the search tool when looking for factual info. You can have opinions if the user asks you for one. 
 

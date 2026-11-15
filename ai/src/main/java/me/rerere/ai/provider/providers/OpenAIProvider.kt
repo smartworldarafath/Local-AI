@@ -1,10 +1,14 @@
 package me.rerere.ai.provider.providers
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -12,10 +16,13 @@ import kotlinx.serialization.json.put
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ContextLimitSource
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.buildEffectiveApiKeyPool
+import me.rerere.ai.provider.selectProviderKey
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.providers.openai.ChatCompletionsAPI
 import me.rerere.ai.provider.providers.openai.ResponseAPI
@@ -27,21 +34,27 @@ import me.rerere.ai.ui.MessageChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.provider.CustomHeader
 import me.rerere.ai.provider.ProviderProxy
+import me.rerere.ai.util.KeyOutcome
 import me.rerere.ai.util.KeyRoulette
+import me.rerere.ai.util.PooledKey
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.common.http.getByKey
+import me.rerere.common.http.jsonArrayOrNull
+import me.rerere.common.http.jsonObjectOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
 import me.rerere.common.http.urlHostOrNull
 import me.rerere.common.platform.PlatformHttpClient
 import me.rerere.common.platform.PlatformHttpProxy
 import me.rerere.common.platform.PlatformHttpRequest
 import me.rerere.common.platform.PlatformMediaEncoder
+import kotlin.uuid.Uuid
 
 class OpenAIProvider(
     private val platformHttpClient: PlatformHttpClient,
     private val platformMediaEncoder: PlatformMediaEncoder,
 ) : Provider<ProviderSetting.OpenAI> {
+    override val supportsEmbeddings: Boolean = true
     private val keyRoulette = KeyRoulette.default()
 
     private val chatCompletionsAPI = ChatCompletionsAPI(
@@ -52,19 +65,28 @@ class OpenAIProvider(
     private val responseAPI = ResponseAPI(
         httpClient = platformHttpClient,
         mediaEncoder = platformMediaEncoder,
+        keyRoulette = keyRoulette,
     )
 
+    private fun selectKey(providerSetting: ProviderSetting.OpenAI): PooledKey {
+        return keyRoulette.selectProviderKey(providerSetting)
+    }
 
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> =
-        withContext(Dispatchers.IO) {
-            val key = keyRoulette.next(providerSetting.apiKey)
+        withContext(me.rerere.ai.util.providerIoDispatcher) {
+            val key = selectKey(providerSetting).value
             
             // Fetch regular models
-            val regularModels = fetchModelsFromUrl(
+            val fetchedRegularModels = fetchModelsFromUrl(
                 url = "${providerSetting.baseUrl}/models",
                 key = key,
                 providerSetting = providerSetting
             )
+            val regularModels = if (providerSetting.isLikelyOllama()) {
+                enrichWithOllamaRuntimeLimits(fetchedRegularModels, providerSetting)
+            } else {
+                fetchedRegularModels
+            }
             
             // For OpenRouter, also fetch embedding models using output_modalities filter
             // OpenRouter's /models endpoint doesn't return embedding models by default
@@ -86,6 +108,84 @@ class OpenAIProvider(
             
             allModels
         }
+
+    private suspend fun enrichWithOllamaRuntimeLimits(
+        models: List<Model>,
+        providerSetting: ProviderSetting.OpenAI,
+    ): List<Model> {
+        val apiBase = providerSetting.baseUrl
+            .trimEnd('/')
+            .removeSuffix("/v1")
+            .removeSuffix("/api") + "/api"
+        val runningLimits = runCatching {
+            val response = platformHttpClient.execute(
+                PlatformHttpRequest(
+                    method = "GET",
+                    url = "$apiBase/ps",
+                    headers = providerSetting.apiKey.takeIf { it.isNotBlank() }
+                        ?.let { mapOf("Authorization" to "Bearer $it") }
+                        .orEmpty(),
+                    proxy = providerSetting.proxy.toPlatformProxy(),
+                )
+            )
+            if (response.statusCode !in 200..299) return@runCatching emptyMap()
+            val root = json.parseToJsonElement(response.body.decodeToString()).jsonObject
+            root["models"]?.jsonArrayOrNull.orEmpty().mapNotNull { item ->
+                val obj = item.jsonObjectOrNull ?: return@mapNotNull null
+                val id = obj["model"]?.jsonPrimitiveOrNull?.contentOrNull
+                    ?: obj["name"]?.jsonPrimitiveOrNull?.contentOrNull
+                    ?: return@mapNotNull null
+                val limit = obj["context_length"]?.jsonPrimitiveOrNull?.contentOrNull
+                    ?.toIntOrNull()
+                    ?.takeIf { it > 0 }
+                    ?: return@mapNotNull null
+                id.lowercase() to limit
+            }.toMap()
+        }.getOrDefault(emptyMap())
+
+        return models.map { model ->
+            val runtimeLimit = runningLimits[model.modelId.lowercase()]
+                ?: fetchOllamaConfiguredContext(apiBase, model.modelId, providerSetting)
+            if (runtimeLimit != null) {
+                model.copy(
+                    contextWindowTokens = runtimeLimit,
+                    contextLimitSource = ContextLimitSource.RUNTIME,
+                )
+            } else {
+                model
+            }
+        }
+    }
+
+    private suspend fun fetchOllamaConfiguredContext(
+        apiBase: String,
+        modelId: String,
+        providerSetting: ProviderSetting.OpenAI,
+    ): Int? = runCatching {
+        val response = platformHttpClient.execute(
+            PlatformHttpRequest(
+                method = "POST",
+                url = "$apiBase/show",
+                headers = buildMap {
+                    put("Content-Type", "application/json")
+                    providerSetting.apiKey.takeIf { it.isNotBlank() }
+                        ?.let { put("Authorization", "Bearer $it") }
+                },
+                body = buildJsonObject { put("model", modelId) }.toString().encodeToByteArray(),
+                mediaType = "application/json",
+                proxy = providerSetting.proxy.toPlatformProxy(),
+            )
+        )
+        if (response.statusCode !in 200..299) return@runCatching null
+        val root = json.parseToJsonElement(response.body.decodeToString()).jsonObject
+        val parameters = root["parameters"]?.jsonPrimitiveOrNull?.contentOrNull.orEmpty()
+        Regex("(?m)^\\s*num_ctx\\s+(\\d+)\\s*$")
+            .find(parameters)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+            ?.takeIf { it > 0 }
+    }.getOrNull()
     
     private suspend fun fetchModelsFromUrl(
         url: String,
@@ -148,6 +248,7 @@ class OpenAIProvider(
             
             val canonicalSlug = modelObj["canonical_slug"]?.jsonPrimitive?.contentOrNull
             val displayName = modelObj["name"]?.jsonPrimitive?.contentOrNull?.ifBlank { null } ?: id
+            val contextLimits = parseOpenAIProviderContextLimits(modelObj)
             val abilities = buildList {
                 if (supportedParameters.any { it == "tools" || it == "tool_choice" }) {
                     add(ModelAbility.TOOL)
@@ -169,17 +270,62 @@ class OpenAIProvider(
                 inputModalities = inputModalities,
                 outputModalities = if (isEmbedding) listOf(Modality.TEXT) else outputModalities,
                 abilities = abilities,
+                contextWindowTokens = contextLimits.contextWindowTokens,
+                maxInputTokens = contextLimits.maxInputTokens,
+                maxOutputTokens = contextLimits.maxOutputTokens,
+                contextLimitSource = contextLimits.source,
             )
         }
     }
 
-    override suspend fun getBalance(providerSetting: ProviderSetting.OpenAI): String = withContext(Dispatchers.IO) {
-        val key = keyRoulette.next(providerSetting.apiKey)
+    override suspend fun getBalance(providerSetting: ProviderSetting.OpenAI): String = withContext(me.rerere.ai.util.providerIoDispatcher) {
+        val keysToQuery = providerSetting.buildEffectiveApiKeyPool()
+            .map { it.value }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .ifEmpty {
+                providerSetting.apiKey.split(Regex("[\\s,]+")).filter { it.isNotBlank() }.distinct()
+            }
+            .ifEmpty {
+                listOf(selectKey(providerSetting).value)
+            }
+
         val url = if (providerSetting.balanceOption.apiPath.startsWith("http")) {
             providerSetting.balanceOption.apiPath
         } else {
             "${providerSetting.baseUrl}${providerSetting.balanceOption.apiPath}"
         }
+
+        if (keysToQuery.size <= 1) {
+            val key = keysToQuery.first()
+            val raw = querySingleBalance(providerSetting, key, url)
+            return@withContext aggregateBalances(listOf(raw))
+        }
+
+        val results = coroutineScope {
+            keysToQuery.map { key ->
+                async {
+                    runCatching {
+                        querySingleBalance(providerSetting, key, url)
+                    }
+                }
+            }.awaitAll()
+        }
+
+        val successful = results.mapNotNull { it.getOrNull() }
+        if (successful.isEmpty()) {
+            val firstError = results.firstNotNullOfOrNull { it.exceptionOrNull() }
+            throw firstError ?: error("Failed to get balance: all keys failed")
+        }
+
+        aggregateBalances(successful)
+    }
+
+    private suspend fun querySingleBalance(
+        providerSetting: ProviderSetting.OpenAI,
+        key: String,
+        url: String,
+    ): String {
         val response = platformHttpClient.execute(
             PlatformHttpRequest(
                 method = "GET",
@@ -192,16 +338,9 @@ class OpenAIProvider(
         if (response.statusCode !in 200..299) {
             error("Failed to get balance: ${response.statusCode} ${response.body.decodeToString()}")
         }
-
         val bodyStr = response.body.decodeToString()
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-        val value = bodyJson.getByKey(providerSetting.balanceOption.resultPath)
-        val digitalValue = value.toFloatOrNull()
-        if(digitalValue != null) {
-            "%.2f".format(digitalValue)
-        } else {
-            value
-        }
+        return bodyJson.getByKey(providerSetting.balanceOption.resultPath)
     }
 
     override suspend fun streamText(
@@ -243,12 +382,12 @@ class OpenAIProvider(
     override suspend fun generateImage(
         providerSetting: ProviderSetting,
         params: ImageGenerationParams
-    ): ImageGenerationResult = withContext(Dispatchers.IO) {
+    ): ImageGenerationResult = withContext(me.rerere.ai.util.providerIoDispatcher) {
         require(providerSetting is ProviderSetting.OpenAI) {
             "Expected OpenAI provider setting"
         }
 
-        val key = keyRoulette.next(providerSetting.apiKey)
+        val key = selectKey(providerSetting).value
 
         val requestBody = json.encodeToString(
             buildJsonObject {
@@ -310,8 +449,8 @@ class OpenAIProvider(
         providerSetting: ProviderSetting.OpenAI,
         input: List<String>,
         model: Model
-    ): List<List<Float>> = withContext(Dispatchers.IO) {
-        val key = keyRoulette.next(providerSetting.apiKey)
+    ): List<List<Float>> = withContext(me.rerere.ai.util.providerIoDispatcher) {
+        val key = selectKey(providerSetting).value
         val requestBody = json.encodeToString(
             buildJsonObject {
                 put("model", model.modelId)
@@ -349,6 +488,57 @@ class OpenAIProvider(
     }
 }
 
+internal data class OpenAIProviderContextLimits(
+    val contextWindowTokens: Int? = null,
+    val maxInputTokens: Int? = null,
+    val maxOutputTokens: Int? = null,
+    val source: ContextLimitSource? = null,
+)
+
+fun ProviderSetting.OpenAI.isLikelyOllama(): Boolean =
+    name.contains("ollama", ignoreCase = true) ||
+        baseUrl.contains(":11434", ignoreCase = true) ||
+        baseUrl.contains("ollama.com", ignoreCase = true)
+
+internal fun parseOpenAIProviderContextLimits(model: JsonObject): OpenAIProviderContextLimits {
+    fun JsonObject.positiveInt(vararg keys: String): Int? = keys.firstNotNullOfOrNull { key ->
+        get(key)?.jsonPrimitiveOrNull?.contentOrNull
+            ?.toLongOrNull()
+            ?.takeIf { it in 1..Int.MAX_VALUE.toLong() }
+            ?.toInt()
+    }
+
+    val topProvider = model["top_provider"] as? JsonObject
+    val combinedCandidates = listOfNotNull(
+        model.positiveInt("context_length", "max_context_length", "max_model_len"),
+        topProvider?.positiveInt("context_length", "max_context_length", "max_model_len"),
+    )
+    // Gateways can expose both a model-family limit and a smaller deployment/routing limit.
+    // The smaller reported value is the only one that can guarantee overflow protection.
+    val combined = combinedCandidates.minOrNull()
+    val maxInput = model.positiveInt("max_input_tokens", "input_token_limit", "inputTokenLimit")
+        ?: topProvider?.positiveInt("max_input_tokens", "input_token_limit", "inputTokenLimit")
+    val maxOutput = model.positiveInt(
+        "max_output_tokens",
+        "output_token_limit",
+        "outputTokenLimit",
+        "max_completion_tokens",
+    ) ?: topProvider?.positiveInt(
+        "max_output_tokens",
+        "output_token_limit",
+        "outputTokenLimit",
+        "max_completion_tokens",
+    )
+    return OpenAIProviderContextLimits(
+        contextWindowTokens = combined,
+        maxInputTokens = maxInput,
+        maxOutputTokens = maxOutput,
+        source = ContextLimitSource.PROVIDER.takeIf {
+            combined != null || maxInput != null || maxOutput != null
+        },
+    )
+}
+
 private fun List<String>.toModalities(): List<Modality> {
     val modalities = linkedSetOf<Modality>()
     forEach { raw ->
@@ -371,8 +561,12 @@ private fun Map<String, String>.withAuthAndJson(key: String): Map<String, String
     )
 }
 
-private fun Map<String, String>.withReferHeaders(baseUrl: String): Map<String, String> {
-    return when (baseUrl.urlHostOrNull()) {
+private fun Map<String, String>.withReferHeaders(
+    baseUrl: String,
+    sessionId: String? = null,
+): Map<String, String> {
+    val host = baseUrl.urlHostOrNull()?.lowercase()
+    var headers = when (host) {
         "aihubmix.com" -> this + ("APP-Code" to "DKHA9468")
         "openrouter.ai" -> this + mapOf(
             "X-Title" to "LastChat",
@@ -380,6 +574,13 @@ private fun Map<String, String>.withReferHeaders(baseUrl: String): Map<String, S
         )
         else -> this
     }
+    if (host == "opencode.ai" || host?.endsWith(".opencode.ai") == true) {
+        if (headers.keys.none { it.equals("x-opencode-session", ignoreCase = true) }) {
+            val session = sessionId?.trim()?.takeIf { it.isNotEmpty() } ?: Uuid.random().toString()
+            headers = headers + ("x-opencode-session" to session)
+        }
+    }
+    return headers
 }
 
 private fun ProviderProxy.toPlatformProxy(): PlatformHttpProxy? {
@@ -393,3 +594,41 @@ private fun ProviderProxy.toPlatformProxy(): PlatformHttpProxy? {
         )
     }
 }
+
+internal data class ParsedBalance(
+    val prefix: String,
+    val amount: Double,
+    val suffix: String,
+)
+
+private val BALANCE_REGEX = Regex("""^([^\d.+-]*)([-+]?[\d,]+(?:\.\d+)?)(.*)$""")
+
+internal fun parseBalanceAmount(raw: String): ParsedBalance? {
+    val trimmed = raw.trim()
+    val match = BALANCE_REGEX.matchEntire(trimmed) ?: return null
+    val prefix = match.groupValues[1]
+    val numStr = match.groupValues[2].replace(",", "")
+    val suffix = match.groupValues[3]
+    val amount = numStr.toDoubleOrNull() ?: return null
+    return ParsedBalance(prefix, amount, suffix)
+}
+
+internal fun aggregateBalances(balances: List<String>): String {
+    if (balances.isEmpty()) return ""
+    if (balances.size == 1) {
+        val single = balances.first()
+        val digitalValue = single.toDoubleOrNull()
+        return if (digitalValue != null) me.rerere.ai.util.formatFixed2(digitalValue) else single
+    }
+    val parsed = balances.mapNotNull { parseBalanceAmount(it) }
+    return if (parsed.isNotEmpty()) {
+        val total = parsed.sumOf { it.amount }
+        val prefix = parsed.firstOrNull { it.prefix.isNotBlank() }?.prefix ?: ""
+        val suffix = parsed.firstOrNull { it.suffix.isNotBlank() }?.suffix ?: ""
+        val formattedTotal = me.rerere.ai.util.formatFixed2(total)
+        "$prefix$formattedTotal$suffix"
+    } else {
+        balances.first()
+    }
+}
+

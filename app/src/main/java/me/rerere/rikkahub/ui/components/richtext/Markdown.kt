@@ -54,6 +54,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -68,6 +69,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
@@ -214,6 +216,220 @@ val THINKING_REGEX = Regex("<think(?:ing)?>([\\s\\S]*?)(?:</think(?:ing)?>|$)", 
 private val ORPHAN_CLOSE_TAG_REGEX = Regex("^([\\s\\S]*?)</think(?:ing)?>", RegexOption.DOT_MATCHES_ALL)
 private val CODE_BLOCK_REGEX = Regex("```[\\s\\S]*?```|`[^`\n]*`", RegexOption.DOT_MATCHES_ALL)
 private val BREAK_LINE_REGEX = Regex("(?i)<br\\s*/?>")
+private val MATH_BLOCK_REGEX = Regex("\\$\\$[\\s\\S]*?\\$\\$|\\$[^$\\n]+?\\$")
+private val HIGHLIGHT_MARKDOWN_REGEX = Regex("(?<![=\\\\])==(?![=\\s])([^=]+?)(?<![\\s=\\\\])==(?!=)")
+private val UNDERLINE_MARKDOWN_REGEX = Regex("(?<![\\+\\\\])\\+\\+(?![\\+\\s])([^\\+]+?)(?<![\\s\\+\\\\])\\+\\+(?!\\+)")
+private val HTML_OPEN_TAG_REGEX = Regex("""^<([a-zA-Z0-9]+)(?:\s+([^>]*))?>$""")
+private val HTML_CLOSE_TAG_REGEX = Regex("""^</([a-zA-Z0-9]+)\s*>$""")
+private val KNOWN_INLINE_TAGS = setOf(
+    "u", "ins", "mark", "b", "strong", "i", "em", "s", "del", "strike",
+    "sub", "sup", "small", "code", "span", "font"
+)
+
+private data class OpenHtmlTag(
+    val tagName: String,
+    val startOffset: Int,
+    val style: SpanStyle,
+)
+
+private class InlineHtmlStyleContext {
+    val openTags = mutableListOf<OpenHtmlTag>()
+
+    fun open(tagName: String, startOffset: Int, style: SpanStyle) {
+        openTags.add(OpenHtmlTag(tagName, startOffset, style))
+    }
+
+    fun close(tagName: String): OpenHtmlTag? {
+        val index = openTags.indexOfLast { it.tagName.equals(tagName, ignoreCase = true) }
+        return if (index >= 0) openTags.removeAt(index) else null
+    }
+
+    inline fun closeAllRemaining(endOffset: Int, onClosed: (SpanStyle, Int, Int) -> Unit) {
+        for (i in openTags.indices.reversed()) {
+            val tag = openTags[i]
+            if (endOffset > tag.startOffset) {
+                onClosed(tag.style, tag.startOffset, endOffset)
+            }
+        }
+        openTags.clear()
+    }
+}
+
+private fun parseInlineCssStyles(attrsString: String): Map<String, String> {
+    if (attrsString.isBlank()) return emptyMap()
+    val styleAttrRegex = Regex("""(?i)\bstyle\s*=\s*["']([^"']*)["']""")
+    val styleMatch = styleAttrRegex.find(attrsString) ?: return emptyMap()
+    val styleContent = styleMatch.groupValues[1]
+    return styleContent.split(';')
+        .mapNotNull { prop ->
+            val colon = prop.indexOf(':')
+            if (colon > 0) {
+                val key = prop.substring(0, colon).trim().lowercase()
+                val value = prop.substring(colon + 1).trim()
+                key to value
+            } else null
+        }
+        .toMap()
+}
+
+internal fun parseColorSafe(colorStr: String): Color? {
+    val clean = colorStr.trim().removeSurrounding("\"", "").removeSurrounding("'", "")
+    val hex = clean.removePrefix("#")
+    if (clean.startsWith("#")) {
+        when (hex.length) {
+            6 -> {
+                val rgb = hex.toLongOrNull(16) ?: return null
+                return Color(0xFF000000 or rgb)
+            }
+            8 -> {
+                val argb = hex.toLongOrNull(16) ?: return null
+                return Color(argb)
+            }
+            3 -> {
+                val r = hex.substring(0, 1).repeat(2)
+                val g = hex.substring(1, 2).repeat(2)
+                val b = hex.substring(2, 3).repeat(2)
+                val rgb = "$r$g$b".toLongOrNull(16) ?: return null
+                return Color(0xFF000000 or rgb)
+            }
+        }
+    }
+    return when (clean.lowercase()) {
+        "red" -> Color.Red
+        "green" -> Color.Green
+        "blue" -> Color.Blue
+        "yellow" -> Color.Yellow
+        "cyan" -> Color.Cyan
+        "magenta" -> Color.Magenta
+        "black" -> Color.Black
+        "white" -> Color.White
+        "gray", "grey" -> Color.Gray
+        else -> runCatching { Color(android.graphics.Color.parseColor(clean)) }.getOrNull()
+    }
+}
+
+internal fun resolveInlineHtmlStyle(
+    tagName: String,
+    attrsString: String,
+    colorScheme: ColorScheme,
+    rpStyleRules: List<RpStyleRule>
+): SpanStyle? {
+    return when (tagName) {
+        "mark" -> {
+            val highlightRule = rpStyleRules.find { (it.pattern == "==" || it.pattern == "<mark>") && it.enabled }
+            val customColor = highlightRule?.let { parseColorSafe(it.colorHex) }
+            if (customColor != null) {
+                SpanStyle(
+                    background = customColor.copy(alpha = 0.25f),
+                    color = customColor,
+                    fontWeight = FontWeight.Medium
+                )
+            } else {
+                val css = parseInlineCssStyles(attrsString)
+                val cssBg = css["background-color"]?.let { parseColorSafe(it) }
+                    ?: css["background"]?.let { parseColorSafe(it) }
+                val cssFg = css["color"]?.let { parseColorSafe(it) }
+
+                SpanStyle(
+                    background = cssBg ?: colorScheme.tertiaryContainer.copy(alpha = 0.55f),
+                    color = cssFg ?: colorScheme.onTertiaryContainer,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+
+        "u", "ins" -> {
+            val underlineRule = rpStyleRules.find { (it.pattern == "++" || it.pattern == "<u>") && it.enabled }
+            val customColor = underlineRule?.let { parseColorSafe(it.colorHex) }
+            val css = parseInlineCssStyles(attrsString)
+            val cssColor = css["color"]?.let { parseColorSafe(it) }
+
+            SpanStyle(
+                textDecoration = TextDecoration.Underline,
+                color = customColor ?: cssColor ?: Color.Unspecified
+            )
+        }
+
+        "b", "strong" -> {
+            val strongRule = rpStyleRules.find { it.pattern == "**" && it.enabled }
+            val strongColor = strongRule?.let { parseColorSafe(it.colorHex) }
+            SpanStyle(fontWeight = FontWeight.Bold, color = strongColor ?: Color.Unspecified)
+        }
+
+        "i", "em" -> {
+            val emphRule = rpStyleRules.find { it.pattern == "*" && it.enabled }
+            val emphColor = emphRule?.let { parseColorSafe(it.colorHex) }
+            SpanStyle(fontStyle = FontStyle.Italic, color = emphColor ?: Color.Unspecified)
+        }
+
+        "s", "del", "strike" -> {
+            val strikeRule = rpStyleRules.find { it.pattern == "~~" && it.enabled }
+            val strikeColor = strikeRule?.let { parseColorSafe(it.colorHex) }
+            SpanStyle(textDecoration = TextDecoration.LineThrough, color = strikeColor ?: Color.Unspecified)
+        }
+
+        "sub" -> {
+            SpanStyle(baselineShift = BaselineShift.Subscript, fontSize = 0.8.em)
+        }
+
+        "sup" -> {
+            SpanStyle(baselineShift = BaselineShift.Superscript, fontSize = 0.8.em)
+        }
+
+        "small" -> {
+            SpanStyle(fontSize = 0.85.em)
+        }
+
+        "code" -> {
+            val codeRule = rpStyleRules.find { it.pattern == "`" && it.enabled }
+            val codeColor = codeRule?.let { parseColorSafe(it.colorHex) }
+            SpanStyle(
+                fontFamily = FontFamily.Monospace,
+                fontSize = 0.95.em,
+                background = colorScheme.secondaryContainer.copy(alpha = 0.2f),
+                color = codeColor ?: Color.Unspecified
+            )
+        }
+
+        "span" -> {
+            val css = parseInlineCssStyles(attrsString)
+            val color = css["color"]?.let { parseColorSafe(it) }
+            val bg = css["background-color"]?.let { parseColorSafe(it) } ?: css["background"]?.let { parseColorSafe(it) }
+            val fontWeight = when (css["font-weight"]?.lowercase()) {
+                "bold", "700", "800", "900" -> FontWeight.Bold
+                "600" -> FontWeight.SemiBold
+                "500" -> FontWeight.Medium
+                else -> null
+            }
+            val fontStyle = if (css["font-style"]?.lowercase() == "italic") FontStyle.Italic else null
+            val textDec = when (css["text-decoration"]?.lowercase()) {
+                "underline" -> TextDecoration.Underline
+                "line-through" -> TextDecoration.LineThrough
+                else -> null
+            }
+
+            if (color != null || bg != null || fontWeight != null || fontStyle != null || textDec != null) {
+                SpanStyle(
+                    color = color ?: Color.Unspecified,
+                    background = bg ?: Color.Unspecified,
+                    fontWeight = fontWeight,
+                    fontStyle = fontStyle,
+                    textDecoration = textDec
+                )
+            } else null
+        }
+
+        "font" -> {
+            val colorAttrRegex = Regex("""(?i)\bcolor\s*=\s*["']([^"']*)["']""")
+            val colorVal = colorAttrRegex.find(attrsString)?.groupValues?.get(1)
+            val color = colorVal?.let { parseColorSafe(it) }
+            if (color != null) SpanStyle(color = color) else null
+        }
+
+        else -> null
+    }
+}
+
 private const val LTR_ISOLATE = '\u2066'
 private const val POP_DIRECTIONAL_ISOLATE = '\u2069'
 
@@ -226,7 +442,13 @@ private data class StreamingTextReveal(
     val ranges: List<StreamingSettleRange>,
     val nowMillis: Long,
     val color: Color,
-    val smoothedCharsPerSecond: Float
+    val smoothedCharsPerSecond: Float,
+    val blurEnabled: Boolean,
+)
+
+internal data class StreamingRevealVisuals(
+    val alpha: Float,
+    val blurRadius: Float,
 )
 
 internal data class StreamingSettleRange(
@@ -240,6 +462,15 @@ val LocalMarkdownParagraphSpacing = compositionLocalOf { 4.dp }
 val LocalMarkdownWorkspaceId = compositionLocalOf<String?> { null }
 
 /**
+ * Optical edge compensation for opaque full-bleed blocks (images, code blocks, tables)
+ * nested inside message bubbles. GroupedMessageBubble pads its content 16.dp horizontally
+ * but only 12.dp vertically, so a leading/trailing box would sit 4.dp closer to the bubble
+ * edge top/bottom than to the sides. Boxes absorb that difference themselves so every
+ * nested element keeps an even optical inset on all sides.
+ */
+private val BubbleEdgeCompensation = 4.dp
+
+/**
  * Safely get color from RP style rule for a given pattern.
  * Returns null if pattern not found, not enabled, or color parsing fails.
  */
@@ -247,11 +478,14 @@ val LocalMarkdownWorkspaceId = compositionLocalOf<String?> { null }
 private fun getRpColor(pattern: String): Color? {
     val rules = LocalRpStyleRules.current
     val rule = rules.find { it.pattern == pattern && it.enabled } ?: return null
-    return runCatching { Color(android.graphics.Color.parseColor(rule.colorHex)) }.getOrNull()
+    return parseColorSafe(rule.colorHex)
 }
 
 // Standard markdown patterns that are handled by the AST parser
-private val STANDARD_PATTERNS = setOf("*", "**", "~~", "`", "#", "##", "###", "####", "#####", "######", ">")
+private val STANDARD_PATTERNS = setOf(
+    "*", "**", "~~", "`", "#", "##", "###", "####", "#####", "######", ">",
+    "==", "++", "<mark>", "<u>"
+)
 
 /**
  * Append text to AnnotatedString.Builder, scanning for custom RP patterns.
@@ -333,7 +567,7 @@ private fun AnnotatedString.Builder.appendTextWithCustomPatterns(
 }
 
 // 预处理markdown内容
-private fun preProcess(content: String): String {
+internal fun preProcess(content: String): String {
     // 先找出所有代码块的位置
     val codeBlocks = mutableListOf<IntRange>()
     CODE_BLOCK_REGEX.findAll(content).forEach { match ->
@@ -360,6 +594,33 @@ private fun preProcess(content: String): String {
             matchResult.value // 保持原样
         } else {
             "$$" + matchResult.groupValues[1] + "$$"
+        }
+    }
+
+    // 找出所有受保护的区域（代码块与公式）
+    val protectedRanges = mutableListOf<IntRange>()
+    CODE_BLOCK_REGEX.findAll(result).forEach { protectedRanges.add(it.range) }
+    MATH_BLOCK_REGEX.findAll(result).forEach { protectedRanges.add(it.range) }
+
+    fun isProtected(range: IntRange): Boolean {
+        return protectedRanges.any { protected -> range.first in protected || range.last in protected }
+    }
+
+    // 替换行内高亮 ==text== 到 <mark>text</mark>，跳过代码块和公式
+    result = HIGHLIGHT_MARKDOWN_REGEX.replace(result) { matchResult ->
+        if (isProtected(matchResult.range) || matchResult.groupValues[1].contains("\n\n")) {
+            matchResult.value
+        } else {
+            "<mark>" + matchResult.groupValues[1] + "</mark>"
+        }
+    }
+
+    // 替换行内下划线 ++text++ 到 <u>text</u>，跳过代码块和公式
+    result = UNDERLINE_MARKDOWN_REGEX.replace(result) { matchResult ->
+        if (isProtected(matchResult.range) || matchResult.groupValues[1].contains("\n\n")) {
+            matchResult.value
+        } else {
+            "<u>" + matchResult.groupValues[1] + "</u>"
         }
     }
 
@@ -559,7 +820,8 @@ fun MarkdownBlock(
             ranges = settleRanges,
             nowMillis = streamingFrameMillis,
             color = contentColor,
-            smoothedCharsPerSecond = streamingPresentation.smoothedCharsPerSecond
+            smoothedCharsPerSecond = streamingPresentation.smoothedCharsPerSecond,
+            blurEnabled = settings.displaySetting.enableBlurEffect,
         )
     } else {
         null
@@ -588,7 +850,6 @@ fun MarkdownBlock(
                             Modifier
                         }
                     )
-                    .padding(start = 4.dp)
             ) {
                 astTree.children.fastForEach { child ->
                     MarkdownNode(
@@ -890,6 +1151,7 @@ private const val STREAMING_SETTLE_MIN_MILLIS = 180L
 private const val STREAMING_SETTLE_MAX_MILLIS = 360L
 private const val STREAMING_SETTLE_ALPHA_FAST = 0.42f
 private const val STREAMING_SETTLE_ALPHA_SLOW = 0.65f
+private const val STREAMING_SETTLE_MAX_BLUR_RADIUS = 5f
 private const val STREAMING_SPEED_SLOW_THRESHOLD = 30f
 private const val STREAMING_SPEED_FAST_THRESHOLD = 150f
 private const val STREAMING_STARVED_REVEAL_MILLIS = 180L
@@ -1011,10 +1273,12 @@ private fun MarkdownNode(
 
         // 列表
         MarkdownElementTypes.UNORDERED_LIST -> {
+            val paragraphSpacing = LocalMarkdownParagraphSpacing.current
+            val bottomPadding = if (node.nextRenderableSibling() != null && paragraphSpacing > 0.dp) paragraphSpacing else 0.dp
             UnorderedListNode(
                 node = node,
                 content = content,
-                modifier = modifier.padding(vertical = 4.dp),
+                modifier = modifier.padding(bottom = bottomPadding),
                 onExpandedStreamingCodeBlockChanged = onExpandedStreamingCodeBlockChanged,
                 onClickCitation = onClickCitation,
                 level = listLevel
@@ -1022,10 +1286,12 @@ private fun MarkdownNode(
         }
 
         MarkdownElementTypes.ORDERED_LIST -> {
+            val paragraphSpacing = LocalMarkdownParagraphSpacing.current
+            val bottomPadding = if (node.nextRenderableSibling() != null && paragraphSpacing > 0.dp) paragraphSpacing else 0.dp
             OrderedListNode(
                 node = node,
                 content = content,
-                modifier = modifier.padding(vertical = 4.dp),
+                modifier = modifier.padding(bottom = bottomPadding),
                 onExpandedStreamingCodeBlockChanged = onExpandedStreamingCodeBlockChanged,
                 onClickCitation = onClickCitation,
                 level = listLevel
@@ -1067,12 +1333,15 @@ private fun MarkdownNode(
                 fontStyle = FontStyle.Italic,
                 color = rpColor ?: Color.Unspecified
             )
+            val paragraphSpacing = LocalMarkdownParagraphSpacing.current
+            val bottomPadding = if (node.nextRenderableSibling() != null && paragraphSpacing > 0.dp) paragraphSpacing else 0.dp
             ProvideTextStyle(textStyle) {
                 val borderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
                 val bgColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
                 CompositionLocalProvider(LocalLayoutDirection provides quoteLayoutDirection) {
                     Column(
-                        modifier = Modifier
+                        modifier = modifier
+                            .padding(bottom = bottomPadding)
                             .drawWithContent {
                                 drawContent()
                                 drawRect(color = bgColor, size = size)
@@ -1184,8 +1453,10 @@ private fun MarkdownNode(
         }
 
         MarkdownTokenTypes.HORIZONTAL_RULE -> {
+            val topPadding = if (node.parent?.children?.firstOrNull { it.type != MarkdownTokenTypes.EOL } == node) 0.dp else 12.dp
+            val bottomPadding = if (node.nextRenderableSibling() != null) 12.dp else 0.dp
             HorizontalDivider(
-                modifier = Modifier.padding(vertical = 16.dp),
+                modifier = modifier.padding(top = topPadding, bottom = bottomPadding),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
                 thickness = 0.5.dp
             )
@@ -1217,8 +1488,13 @@ private fun MarkdownNode(
                 mutableStateOf(resolveImageDisplayInfo(imageContext, imageModel))
             }
 
+            val paragraphSpacing = LocalMarkdownParagraphSpacing.current
+            // Block-level images only: an inline image inside a paragraph must not gain gaps.
+            val isBlockImage = node.parent?.type == MarkdownElementTypes.MARKDOWN_FILE
+
             Column(
-                modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally
+                modifier = modifier.mediaEdgePadding(node, paragraphSpacing, blockLevel = isBlockImage),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 val info = reservedInfo
                 val reservedModifier = if (info != null && info.widthPx > 0 && info.heightPx > 0) {
@@ -1228,8 +1504,13 @@ private fun MarkdownNode(
                         .fillMaxWidth()
                         .aspectRatio(info.aspectRatio)
                 } else {
+                    // Intrinsic size unknown (typical for remote URLs): still take the full
+                    // row width so consecutive images stack vertically — and following text
+                    // drops below the image — with the regular paragraph spacing between
+                    // them, instead of squeezing side-by-side with only the small
+                    // horizontal gap. The real aspect box is applied onSizeResolved below.
                     Modifier
-                        .widthIn(min = 120.dp)
+                        .fillMaxWidth()
                         .heightIn(min = 120.dp)
                 }
                 // 这里可以使用Coil等图片加载库加载图片
@@ -1262,10 +1543,12 @@ private fun MarkdownNode(
 
         GFMElementTypes.BLOCK_MATH -> {
             val formula = node.getTextInNode(content)
+            val paragraphSpacing = LocalMarkdownParagraphSpacing.current
+            val bottomPadding = if (node.nextRenderableSibling() != null && paragraphSpacing > 0.dp) paragraphSpacing else 0.dp
             MathBlock(
                 formula, modifier = modifier
                     .fillMaxWidth()
-                    .padding(vertical = 8.dp)
+                    .padding(bottom = bottomPadding)
             )
         }
 
@@ -1285,12 +1568,13 @@ private fun MarkdownNode(
 
         MarkdownElementTypes.CODE_BLOCK -> {
             val code = node.getTextInNode(content)
+            val paragraphSpacing = LocalMarkdownParagraphSpacing.current
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                 HighlightCodeBlock(
                     code = code,
                     language = "plaintext",
-                    modifier = Modifier
-                        .padding(bottom = 4.dp)
+                    modifier = modifier
+                        .mediaEdgePadding(node, paragraphSpacing)
                         .fillMaxWidth(),
                     onExpandedStreamingContentChanged = onExpandedStreamingCodeBlockChanged,
                     completeCodeBlock = true
@@ -1317,22 +1601,23 @@ private fun MarkdownNode(
                 node.findChildOfTypeRecursive(MarkdownTokenTypes.FENCE_LANG)?.getTextInNode(content) ?: "plaintext"
             val normalizedLanguage = normalizeCodeBlockLanguage(language)
             val hasEnd = node.findChildOfTypeRecursive(MarkdownTokenTypes.CODE_FENCE_END) != null
+            val paragraphSpacing = LocalMarkdownParagraphSpacing.current
 
             // Mermaid diagrams: render directly without HighlightCodeBlock wrapper
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                 if (hasEnd && normalizedLanguage == "mermaid") {
                     Mermaid(
                         code = code,
-                        modifier = Modifier
-                            .padding(bottom = 4.dp)
+                        modifier = modifier
+                            .mediaEdgePadding(node, paragraphSpacing)
                             .fillMaxWidth(),
                     )
                 } else {
                     HighlightCodeBlock(
                         code = code,
                         language = normalizedLanguage,
-                        modifier = Modifier
-                            .padding(bottom = 4.dp)
+                        modifier = modifier
+                            .mediaEdgePadding(node, paragraphSpacing)
                             .fillMaxWidth(),
                         onExpandedStreamingContentChanged = onExpandedStreamingCodeBlockChanged,
                         completeCodeBlock = hasEnd
@@ -1371,8 +1656,10 @@ private fun MarkdownNode(
 
         MarkdownElementTypes.HTML_BLOCK -> {
             val text = node.getTextInNode(content)
+            val paragraphSpacing = LocalMarkdownParagraphSpacing.current
+            val bottomPadding = if (node.nextRenderableSibling() != null && paragraphSpacing > 0.dp) paragraphSpacing else 0.dp
             SimpleHtmlBlock(
-                html = text, modifier = modifier
+                html = text, modifier = modifier.padding(bottom = bottomPadding)
             )
         }
 
@@ -1582,15 +1869,26 @@ private fun Paragraph(
     // dumpAst(node, content)
     val paragraphDirection = rememberContentDirection(node.getTextInNode(content))
     if (node.findChildOfTypeRecursive(MarkdownElementTypes.IMAGE, GFMElementTypes.BLOCK_MATH) != null) {
+        val paragraphSpacing = LocalMarkdownParagraphSpacing.current
+        // This row usually holds an opaque image: absorb the bubble edge difference here
+        // (see BubbleEdgeCompensation) so a leading/trailing image keeps an even optical
+        // inset. The IMAGE branch itself stays untouched to avoid double compensation.
+        val edgeModifier = Modifier.mediaEdgePadding(node, paragraphSpacing)
         CompositionLocalProvider(LocalLayoutDirection provides paragraphDirection.toLayoutDirection()) {
-            FlowRow(modifier = modifier) {
+            FlowRow(
+                modifier = modifier.then(edgeModifier),
+                verticalArrangement = Arrangement.spacedBy(paragraphSpacing),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 node.children.fastForEach { child ->
-                    MarkdownNode(
-                        node = child,
-                        content = content,
-                        onExpandedStreamingCodeBlockChanged = onExpandedStreamingCodeBlockChanged,
-                        onClickCitation = onClickCitation
-                    )
+                    if (child.type != MarkdownTokenTypes.EOL) {
+                        MarkdownNode(
+                            node = child,
+                            content = content,
+                            onExpandedStreamingCodeBlockChanged = onExpandedStreamingCodeBlockChanged,
+                            onClickCitation = onClickCitation
+                        )
+                    }
                 }
             }
         }
@@ -1611,6 +1909,7 @@ private fun Paragraph(
     val streamingReveal = LocalStreamingTextReveal.current
     val annotatedString = remember(content, rpStyleRules, streamingReveal) {
         buildAnnotatedString {
+            val htmlContext = InlineHtmlStyleContext()
             node.children.fastForEach { child ->
                 appendMarkdownNodeContent(
                     node = child,
@@ -1623,7 +1922,11 @@ private fun Paragraph(
                     trim = trim,
                     rpStyleRules = rpStyleRules,
                     streamingReveal = streamingReveal,
+                    htmlContext = htmlContext,
                 )
+            }
+            htmlContext.closeAllRemaining(length) { spanStyle, start, end ->
+                addStyle(spanStyle, start, end)
             }
         }
     }
@@ -1700,12 +2003,13 @@ private fun TableNode(node: ASTNode, content: String, modifier: Modifier = Modif
         }
     }
 
+    val paragraphSpacing = LocalMarkdownParagraphSpacing.current
     // 渲染表格
     CompositionLocalProvider(LocalLayoutDirection provides tableDirection.toLayoutDirection()) {
         DataTable(
             headers = headers,
             rows = rowComposables,
-            modifier = modifier.padding(vertical = 8.dp),
+            modifier = modifier.mediaEdgePadding(node, paragraphSpacing),
             columnMinWidths = List(columnCount) { 80.dp },
             columnMaxWidths = List(columnCount) { 200.dp },
         )
@@ -1723,6 +2027,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
     onClickCitation: (String) -> Unit = {},
     rpStyleRules: List<RpStyleRule> = emptyList(),
     streamingReveal: StreamingTextReveal? = null,
+    htmlContext: InlineHtmlStyleContext? = null,
 ) {
     val outputStart = length
     when {
@@ -1739,6 +2044,49 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     )
                 ) {
                     append(link)
+                }
+            }
+        }
+
+        node.type == MarkdownTokenTypes.HTML_TAG -> {
+            val rawTag = node.getTextInNode(content).trim()
+            when {
+                BREAK_LINE_REGEX.matches(rawTag) -> {
+                    append("\n")
+                }
+
+                rawTag.startsWith("</") -> {
+                    val closeMatch = HTML_CLOSE_TAG_REGEX.matchEntire(rawTag)
+                    val tagName = closeMatch?.groupValues?.get(1)?.lowercase()
+                        ?: rawTag.removePrefix("</").removeSuffix(">").trim().lowercase()
+                    val closed = htmlContext?.close(tagName)
+                    if (closed != null) {
+                        if (length > closed.startOffset) {
+                            addStyle(closed.style, closed.startOffset, length)
+                        }
+                    } else if (!KNOWN_INLINE_TAGS.contains(tagName)) {
+                        appendTextWithCustomPatterns(rawTag, rpStyleRules)
+                    }
+                }
+
+                rawTag.startsWith("<") && !rawTag.endsWith("/>") -> {
+                    val tagMatch = HTML_OPEN_TAG_REGEX.matchEntire(rawTag)
+                    val tagName = tagMatch?.groupValues?.get(1)?.lowercase()
+                    val attrsString = tagMatch?.groupValues?.get(2)?.trim() ?: ""
+
+                    val spanStyle = if (tagName != null) {
+                        resolveInlineHtmlStyle(tagName, attrsString, colorScheme, rpStyleRules)
+                    } else null
+
+                    if (spanStyle != null && tagName != null) {
+                        htmlContext?.open(tagName, length, spanStyle)
+                    } else {
+                        appendTextWithCustomPatterns(rawTag, rpStyleRules)
+                    }
+                }
+
+                else -> {
+                    appendTextWithCustomPatterns(rawTag, rpStyleRules)
                 }
             }
         }
@@ -1770,7 +2118,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         style = style,
                         onClickCitation = onClickCitation,
                         rpStyleRules = rpStyleRules,
-                        streamingReveal = streamingReveal
+                        streamingReveal = streamingReveal,
+                        htmlContext = htmlContext,
                     )
                 }
             }
@@ -1791,7 +2140,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         style = style,
                         onClickCitation = onClickCitation,
                         rpStyleRules = rpStyleRules,
-                        streamingReveal = streamingReveal
+                        streamingReveal = streamingReveal,
+                        htmlContext = htmlContext,
                     )
                 }
             }
@@ -1812,7 +2162,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                         style = style,
                         onClickCitation = onClickCitation,
                         rpStyleRules = rpStyleRules,
-                        streamingReveal = streamingReveal
+                        streamingReveal = streamingReveal,
+                        htmlContext = htmlContext,
                     )
                 }
             }
@@ -1967,7 +2318,7 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
         // 其他类型继续递归处理
         else -> {
             node.children.fastForEach {
-            appendMarkdownNodeContent(
+                appendMarkdownNodeContent(
                     node = it,
                     content = content,
                     inlineContents = inlineContents,
@@ -1976,7 +2327,8 @@ private fun AnnotatedString.Builder.appendMarkdownNodeContent(
                     style = style,
                     onClickCitation = onClickCitation,
                     rpStyleRules = rpStyleRules,
-                    streamingReveal = streamingReveal
+                    streamingReveal = streamingReveal,
+                    htmlContext = htmlContext,
                 )
             }
         }
@@ -2025,19 +2377,51 @@ private fun AnnotatedString.Builder.applyStreamingRevealStyle(
         val progress = (ageMillis / settleDurationMillis).coerceIn(0f, 1f)
         // Smooth-step curve: 3t^2 - 2t^3
         val easedProgress = progress * progress * (3f - 2f * progress)
-        val alpha = startAlpha + (1f - startAlpha) * easedProgress
-        if (alpha >= 0.995f) return@fastForEach
+        val visuals = streamingRevealVisuals(
+            progress = easedProgress,
+            startAlpha = startAlpha,
+            blurEnabled = reveal.blurEnabled,
+        )
+        if (visuals.alpha >= 0.995f && visuals.blurRadius <= 0.01f) return@fastForEach
 
         val rangeStart = outputStart + ((overlapStart - sourceStart) * outputLength / sourceLength)
         val rangeEnd = outputStart + ((overlapEnd - sourceStart) * outputLength / sourceLength)
         if (rangeEnd <= rangeStart) return@fastForEach
 
         addStyle(
-            style = SpanStyle(color = reveal.color.copy(alpha = alpha)),
+            style = SpanStyle(
+                color = reveal.color.copy(alpha = visuals.alpha),
+                shadow = if (visuals.blurRadius > 0.01f) {
+                    Shadow(
+                        color = reveal.color.copy(alpha = visuals.alpha),
+                        offset = Offset.Zero,
+                        blurRadius = visuals.blurRadius,
+                    )
+                } else {
+                    null
+                },
+            ),
             start = rangeStart.coerceIn(outputStart, outputEnd),
             end = rangeEnd.coerceIn(outputStart, outputEnd)
         )
     }
+}
+
+internal fun streamingRevealVisuals(
+    progress: Float,
+    startAlpha: Float,
+    blurEnabled: Boolean,
+): StreamingRevealVisuals {
+    val safeProgress = progress.coerceIn(0f, 1f)
+    return StreamingRevealVisuals(
+        alpha = startAlpha.coerceIn(0f, 1f) +
+            (1f - startAlpha.coerceIn(0f, 1f)) * safeProgress,
+        blurRadius = if (blurEnabled) {
+            STREAMING_SETTLE_MAX_BLUR_RADIUS * (1f - safeProgress)
+        } else {
+            0f
+        },
+    )
 }
 
 private fun ASTNode.getTextInNode(text: String): String {
@@ -2067,6 +2451,33 @@ private fun ASTNode.nextRenderableSibling(): ASTNode? {
     return siblings
         .drop(currentIndex + 1)
         .firstOrNull { it.type != MarkdownTokenTypes.EOL }
+}
+
+private fun ASTNode.previousRenderableSibling(): ASTNode? {
+    val siblings = this.parent?.children ?: return null
+    val currentIndex = siblings.indexOf(this).takeIf { it >= 0 } ?: return null
+    return siblings
+        .take(currentIndex)
+        .lastOrNull { it.type != MarkdownTokenTypes.EOL }
+}
+
+/**
+ * Outer gaps for an opaque full-bleed block so it stays optically centered inside
+ * rounded containers: regular [paragraphSpacing] toward a following sibling, plus
+ * [BubbleEdgeCompensation] at a leading/trailing edge. Inline content
+ * ([blockLevel] = false, e.g. an image inside a paragraph) is left untouched.
+ */
+private fun Modifier.mediaEdgePadding(
+    node: ASTNode,
+    paragraphSpacing: Dp,
+    blockLevel: Boolean = true,
+): Modifier {
+    if (!blockLevel) return this
+    val next = node.nextRenderableSibling()
+    val top = if (node.previousRenderableSibling() == null) BubbleEdgeCompensation else 0.dp
+    val bottom = (if (next != null && paragraphSpacing > 0.dp) paragraphSpacing else 0.dp) +
+        if (next == null) BubbleEdgeCompensation else 0.dp
+    return this.padding(top = top, bottom = bottom)
 }
 
 private fun ASTNode.findChildOfTypeRecursive(vararg types: IElementType): ASTNode? {

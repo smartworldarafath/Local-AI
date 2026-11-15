@@ -7,6 +7,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import me.rerere.common.http.jsonPrimitiveOrNull
 import me.rerere.ai.core.MessageRole
@@ -80,11 +81,15 @@ data class UIMessage(
                         if (existingReasoningPart != null) {
                             val reasoning = existingReasoningPart.reasoning + deltaPart.reasoning
                             // Prefer: (1) explicit title on delta, (2) title from the new delta text,
-                            // (3) latest title found anywhere in the accumulated text, (4) keep old title.
+                            // (3) latest title found anywhere in the accumulated text (only rescanned on newlines or if missing), (4) keep old title.
+                            val hasNewline = deltaPart.reasoning.contains('\n') || deltaPart.reasoning.contains('\r')
                             val title = deltaPart.title
                                 ?: deltaPart.reasoning.extractReasoningSummaryTitle()
-                                ?: reasoning.extractLatestReasoningSummaryTitle()
-                                ?: existingReasoningPart.title
+                                ?: if (hasNewline || existingReasoningPart.title == null) {
+                                    reasoning.extractLatestReasoningSummaryTitle() ?: existingReasoningPart.title
+                                } else {
+                                    existingReasoningPart.title
+                                }
                             acc.map { part ->
                                 if (part is UIMessagePart.Reasoning) {
                                     UIMessagePart.Reasoning(
@@ -96,7 +101,6 @@ data class UIMessage(
                                     ).also {
                                         if (deltaPart.metadata != null) {
                                             it.metadata = deltaPart.metadata // 更新metadata
-                                            println("更新metadata: ${kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }.encodeToString(deltaPart)}")
                                         }
                                     }
                                 } else part
@@ -194,6 +198,43 @@ data class UIMessage(
     }
 
     /**
+     * High-fidelity digest preserving conversation dialogue, structured tool actions, and execution results.
+     * Used by conversation summarizers so tool actions, bash commands, code edits, and search results
+     * are never lost or rendered as blank lines.
+     */
+    fun toSummarizableDigest(maxPartLength: Int = 1000): String {
+        return parts.mapNotNull { part ->
+            when (part) {
+                is UIMessagePart.Text -> {
+                    if (part.text.isBlank()) null else {
+                        if (part.text.length > maxPartLength) part.text.take(maxPartLength) + "…" else part.text
+                    }
+                }
+                is UIMessagePart.ToolCall -> {
+                    val args = if (part.arguments.length > 250) part.arguments.take(247) + "…" else part.arguments
+                    "[Action: ${part.toolName}($args)]"
+                }
+                is UIMessagePart.ToolResult -> {
+                    val raw = when (val c = part.content) {
+                        is JsonPrimitive -> c.content
+                        is JsonObject -> c["receipt"]?.jsonPrimitiveOrNull?.contentOrNull ?: c.toString()
+                        else -> c.toString()
+                    }.trim()
+                    val preview = if (raw.length > 400) raw.take(397).trimEnd() + "…" else raw
+                    "[Action Result: ${part.toolName} -> $preview]"
+                }
+                is UIMessagePart.Document -> "[Document: ${part.fileName} (${part.mime})]"
+                is UIMessagePart.Image -> "[Image attachment]"
+                is UIMessagePart.Audio -> "[Audio attachment]"
+                is UIMessagePart.Video -> "[Video attachment]"
+                is UIMessagePart.Reasoning -> part.title?.takeIf { it.isNotBlank() }?.let { "[Reasoning Summary: $it]" }
+                is UIMessagePart.Thinking -> null
+                else -> null
+            }
+        }.filter { it.isNotBlank() }.joinToString(separator = "\n")
+    }
+
+    /**
      * Extract only text content, excluding reasoning/thinking parts.
      * Use this for background tasks where reasoning output should not be included.
      */
@@ -201,7 +242,7 @@ data class UIMessage(
         val text = parts.filterIsInstance<UIMessagePart.Text>()
             .joinToString(separator = "\n") { it.text }
         
-        return text.replace(Regex("<think(?:ing)?>([\\s\\S]*?)(?:</think(?:ing)?>|$)", RegexOption.DOT_MATCHES_ALL), "").trim()
+        return text.replace(Regex("<think(?:ing)?>([\\s\\S]*?)(?:</think(?:ing)?>|$)"), "").trim()
     }
 
     fun getToolCalls() = parts.filterIsInstance<UIMessagePart.ToolCall>()
@@ -263,7 +304,9 @@ data class UsedLorebookEntry(
     val entryName: String,
     val entryIndex: Int,  // Position in the lorebook's entry list
     val priority: Int = 0,  // Higher = more priority (for sorting display)
-    val activationReason: String? = null // e.g. "Always Active", "Keywords: foo, bar", "RAG (0.85)"
+    val activationReason: String? = null, // e.g. "Always Active", "Keywords: foo, bar", "RAG (0.85)"
+    /** Full injected prompt cost, retained because [entryName] alone cannot reconstruct it. */
+    val contextTokenCount: Int? = null,
 )
 
 /**
@@ -287,7 +330,9 @@ data class UsedMemory(
     val memoryContent: String,  // First line/truncated content for display
     val memoryType: Int,  // 0 = CORE, 1 = EPISODIC
     val priority: Int = 0,
-    val activationReason: String? = null  // "Contextually relevant", "Always included", "Recent episode boost"
+    val activationReason: String? = null,  // "Contextually relevant", "Always included", "Recent episode boost"
+    /** Full injected size retained for accurate future context previews without storing raw memory. */
+    val contextTokenCount: Int? = null,
 )
 
 
@@ -356,45 +401,38 @@ fun List<UIMessage>.truncate(index: Int): List<UIMessage> {
 }
 
 fun List<UIMessage>.limitContext(size: Int): List<UIMessage> {
-    if (size <= 0 || this.size <= size) return this
+    if (size <= 0) return this
+    if (this.size <= size) return this
 
-    val startIndex = this.size - size
-    var adjustedStartIndex = startIndex
+    var adjustedStartIndex = this.size - size
 
-    // 循环往前查找，直到满足所有依赖条件
-    var needsAdjustment = true
-    val visitedIndices = mutableSetOf<Int>()
-
-    while (needsAdjustment && adjustedStartIndex > 0) {
-        needsAdjustment = false
-
-        // 防止无限循环
-        if (adjustedStartIndex in visitedIndices) break
-        visitedIndices.add(adjustedStartIndex)
-
-        val currentMessage = this[adjustedStartIndex]
-
-        // 如果当前消息包含tool result，往前查找对应的tool call
-        if (currentMessage.getToolResults().isNotEmpty()) {
-            for (i in adjustedStartIndex - 1 downTo 0) {
-                if (this[i].getToolCalls().isNotEmpty()) {
-                    adjustedStartIndex = i
-                    needsAdjustment = true
-                    break
+    // Close dependencies over the whole retained suffix. A result can occur after an unrelated
+    // retained message while its matching call is still before the initial boundary.
+    while (adjustedStartIndex > 0) {
+        var requiredStart = adjustedStartIndex
+        for (messageIndex in adjustedStartIndex until this.size) {
+            this[messageIndex].getToolResults().forEach { result ->
+                val callIndex = (messageIndex - 1 downTo 0).firstOrNull { index ->
+                    this[index].getToolCalls().any { call ->
+                        if (result.toolCallId.isNotBlank() && call.toolCallId.isNotBlank()) {
+                            result.toolCallId == call.toolCallId
+                        } else {
+                            result.toolName.isNotBlank() && result.toolName == call.toolName
+                        }
+                    }
                 }
+                if (callIndex != null) requiredStart = minOf(requiredStart, callIndex)
             }
         }
-
-        // 如果当前消息包含tool call，往前查找对应的用户消息
-        if (currentMessage.getToolCalls().isNotEmpty()) {
-            for (i in adjustedStartIndex - 1 downTo 0) {
-                if (this[i].role == MessageRole.USER) {
-                    adjustedStartIndex = i
-                    needsAdjustment = true
-                    break
-                }
+        for (messageIndex in requiredStart until this.size) {
+            if (this[messageIndex].getToolCalls().isEmpty()) continue
+            val userIndex = (messageIndex - 1 downTo 0).firstOrNull { index ->
+                this[index].role == MessageRole.USER
             }
+            if (userIndex != null) requiredStart = minOf(requiredStart, userIndex)
         }
+        if (requiredStart == adjustedStartIndex) break
+        adjustedStartIndex = requiredStart
     }
 
     return this.subList(adjustedStartIndex, this.size)
@@ -502,10 +540,130 @@ sealed class UIMessagePart {
         val toolName: String,
         val content: JsonElement,
         val arguments: JsonElement,
-        override var metadata: JsonObject? = null
+        override var metadata: JsonObject? = null,
+        val inspectedImages: List<ToolResultImage> = emptyList(),
     ) : UIMessagePart() {
         override val priority: Int = 0
     }
+}
+
+@Serializable
+data class ToolResultImage(
+    val url: String = "",
+    val mimeType: String = "image/jpeg",
+    val title: String? = null,
+    val sourceUrl: String? = null,
+    val markdownImage: String? = null,
+    val originTool: String? = null,
+)
+
+fun extractMimeTypeFromDataUrl(url: String, fallback: String = "image/jpeg"): String {
+    val trimmed = url.trim()
+    if (trimmed.startsWith("data:", ignoreCase = true)) {
+        val afterData = trimmed.substring(5)
+        val semiIndex = afterData.indexOf(';')
+        val commaIndex = afterData.indexOf(',')
+        val endIndex = when {
+            semiIndex >= 0 && commaIndex >= 0 -> minOf(semiIndex, commaIndex)
+            semiIndex >= 0 -> semiIndex
+            commaIndex >= 0 -> commaIndex
+            else -> -1
+        }
+        if (endIndex > 0) {
+            val mime = afterData.substring(0, endIndex).trim().lowercase()
+            if (mime.contains('/')) return mime
+        }
+    }
+    return fallback.ifBlank { "image/jpeg" }
+}
+
+fun buildToolImageProvenanceText(
+    result: UIMessagePart.ToolResult,
+    imageIndex: Int,
+    image: ToolResultImage,
+): String {
+    val origin = image.originTool?.takeIf { it.isNotBlank() }
+        ?: result.toolName.ifBlank { "tool" }
+    val callIdPart = result.toolCallId.takeIf { it.isNotBlank() }?.let { " (tool_call_id=$it)" } ?: ""
+    val embedMarkdown = image.markdownImage?.takeIf { it.isNotBlank() }
+        ?: image.sourceUrl?.takeIf { it.isNotBlank() }?.let { url ->
+            val title = image.title?.takeIf { t -> t.isNotBlank() } ?: "Image"
+            "![$title]($url)"
+        }
+    return buildString {
+        append("[TOOL VISUAL INSPECTION #")
+        append(imageIndex)
+        append(" from `")
+        append(origin)
+        append("`")
+        append(callIdPart)
+        append(" | PRIVATE TO ASSISTANT — THE USER CANNOT SEE THIS IMAGE. NOT UPLOADED BY USER.")
+        image.title?.takeIf { it.isNotBlank() }?.let {
+            append(" Title: \"")
+            append(it)
+            append("\".")
+        }
+        image.sourceUrl?.takeIf { it.isNotBlank() }?.let {
+            append(" Source/Path: ")
+            append(it)
+            append(".")
+        }
+        if (!embedMarkdown.isNullOrBlank()) {
+            append(" If you want the user to see this image, embed it in your reply using: ")
+            append(embedMarkdown)
+        }
+        append("]")
+    }
+}
+
+fun List<UIMessage>.stripEphemeralToolImagePayloads(): List<UIMessage> {
+    var changed = false
+    val updated = map { message ->
+        var messageChanged = false
+        val newParts = message.parts.map { part ->
+            if (part is UIMessagePart.ToolResult && part.inspectedImages.any { it.url.isNotBlank() }) {
+                messageChanged = true
+                changed = true
+                part.copy(
+                    inspectedImages = part.inspectedImages.map { img ->
+                        if (img.url.isNotBlank()) img.copy(url = "") else img
+                    }
+                )
+            } else {
+                part
+            }
+        }
+        if (messageChanged) message.copy(parts = newParts) else message
+    }
+    return if (changed) updated else this
+}
+
+fun List<UIMessage>.coalesceConsecutiveToolMessages(): List<UIMessage> {
+    if (size <= 1) return this
+    val result = ArrayList<UIMessage>(size)
+    var i = 0
+    var changed = false
+    while (i < size) {
+        val current = this[i]
+        if (current.role == MessageRole.TOOL) {
+            val toolMessages = mutableListOf<UIMessage>()
+            while (i < size && this[i].role == MessageRole.TOOL) {
+                toolMessages.add(this[i])
+                i++
+            }
+            if (toolMessages.size > 1) {
+                changed = true
+                val mergedParts = toolMessages.flatMap { it.parts }
+                result.add(toolMessages.first().copy(parts = mergedParts))
+            } else {
+                result.add(toolMessages.first())
+            }
+        } else {
+            result.add(current)
+            i++
+        }
+    }
+    return if (changed) result else this
 }
 
 private fun mergeToolName(existing: String, incoming: String): String {
@@ -679,27 +837,35 @@ fun String.extractReasoningSummaryTitle(): String? {
     return extractTitleFromLine(firstLine, hasMultipleLines = this.contains('\n') || this.contains('\r'))
 }
 
+private val LIST_PREFIX_REGEX = Regex("^(?:[-*+]|\\d+\\.)\\s+")
+private val HEADING_PREFIX_REGEX = Regex("^#+\\s*")
+
 /**
  * Scans the full accumulated reasoning text and returns the title from the LAST
  * heading/bold line found. This allows the pill to track the current reasoning
  * section as new blocks stream in.
+ *
+ * Scans backwards from the end of the text without allocating intermediate line collections.
  */
 fun String.extractLatestReasoningSummaryTitle(): String? {
     val hasMultipleLines = this.contains('\n') || this.contains('\r')
-    // Walk lines in reverse, return the first (i.e. latest) title we find.
-    return lineSequence()
-        .map { it.trim() }
-        .filter { it.isNotBlank() }
-        .toList()
-        .asReversed()
-        .firstNotNullOfOrNull { line ->
-            extractTitleFromLine(line, hasMultipleLines)
+    var endIndex = length
+    while (endIndex > 0) {
+        val lastNewline = lastIndexOfAny(charArrayOf('\n', '\r'), endIndex - 1)
+        val lineStart = if (lastNewline == -1) 0 else lastNewline + 1
+        val line = substring(lineStart, endIndex).trim()
+        if (line.isNotBlank()) {
+            val title = extractTitleFromLine(line, hasMultipleLines)
+            if (title != null) return title
         }
+        endIndex = if (lastNewline == -1) 0 else lastNewline
+    }
+    return null
 }
 
 private fun extractTitleFromLine(line: String, hasMultipleLines: Boolean): String? {
     val trimmedLine = line.trim()
-        .replace(Regex("^(?:[-*+]|\\d+\\.)\\s+"), "")
+        .replace(LIST_PREFIX_REGEX, "")
         .trim()
 
     val stripped = when {
@@ -712,7 +878,7 @@ private fun extractTitleFromLine(line: String, hasMultipleLines: Boolean): Strin
             if (idx >= 0) trimmedLine.substring(2, idx).trim() else null
         }
         trimmedLine.startsWith("#") -> {
-            if (hasMultipleLines) trimmedLine.replace(Regex("^#+\\s*"), "") else null
+            if (hasMultipleLines) trimmedLine.replace(HEADING_PREFIX_REGEX, "") else null
         }
         else -> null
     }?.trim()?.trimEnd(':')?.trim()

@@ -41,17 +41,17 @@ import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.PhoneAndroid
-import androidx.compose.material.icons.rounded.SystemUpdate
-import me.rerere.rikkahub.ui.components.ui.SupportPaymentSheet
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -61,6 +61,7 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.datastore.isNotConfigured
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.nav.OneUITopAppBar
+import me.rerere.rikkahub.ui.components.ui.SupportPaymentSheet
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.HapticPattern
 import me.rerere.rikkahub.ui.hooks.rememberPremiumHaptics
@@ -79,7 +80,6 @@ fun SettingPage(
     val settings by vm.settings.collectAsStateWithLifecycle()
     val lazyListState = rememberLazyListState()
     val mainSettingItemPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp)
-    var showSupportSheet by remember { mutableStateOf(false) }
     
     Scaffold(
         topBar = {
@@ -165,7 +165,7 @@ fun SettingPage(
 
                     SettingGroupItem(
                         title = stringResource(R.string.setting_page_mcp),
-                        icon = { Icon(Icons.Rounded.Code, null, modifier = Modifier.size(20.dp)) },
+                        icon = { Icon(Icons.Rounded.Extension, null, modifier = Modifier.size(20.dp)) },
                         contentPadding = mainSettingItemPadding,
                         onClick = { navController.navigate(Screen.SettingMcp) }
                     )
@@ -231,23 +231,23 @@ fun SettingPage(
                         contentPadding = mainSettingItemPadding,
                         onClick = { navController.navigate(Screen.SettingAppUpdate) }
                     )
-                    
+
+                    var showSupportSheet by remember { mutableStateOf(false) }
                     SettingGroupItem(
                         title = stringResource(R.string.buy_me_a_coffee),
                         icon = { Icon(Icons.Rounded.Favorite, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error) },
                         contentPadding = mainSettingItemPadding,
-                        onClick = { 
+                        onClick = {
                             showSupportSheet = true
                         }
                     )
+                    if (showSupportSheet) {
+                        SupportPaymentSheet(
+                            onDismissRequest = { showSupportSheet = false }
+                        )
+                    }
                 }
             }
-        }
-
-        if (showSupportSheet) {
-            SupportPaymentSheet(
-                onDismissRequest = { showSupportSheet = false }
-            )
         }
     }
 }

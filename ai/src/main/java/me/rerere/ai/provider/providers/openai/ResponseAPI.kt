@@ -29,6 +29,7 @@ import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ProviderProxy
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.selectProviderKey
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.MessageChunk
@@ -45,15 +46,24 @@ import me.rerere.common.platform.PlatformHttpClient
 import me.rerere.common.platform.PlatformHttpProxy
 import me.rerere.common.platform.PlatformHttpRequest
 import me.rerere.common.platform.PlatformServerEvent
+import me.rerere.ai.util.KeyOutcome
+import me.rerere.ai.util.KeyRoulette
+import me.rerere.ai.util.PooledKey
 import me.rerere.common.platform.PlatformMediaEncoder
 import kotlin.time.Clock
+import kotlin.uuid.Uuid
 
 private const val TAG = "ResponseAPI"
 
 class ResponseAPI(
     private val httpClient: PlatformHttpClient,
     private val mediaEncoder: PlatformMediaEncoder,
+    private val keyRoulette: KeyRoulette = KeyRoulette.default(),
 ) : OpenAIImpl {
+    private fun selectKey(providerSetting: ProviderSetting.OpenAI): PooledKey {
+        return keyRoulette.selectProviderKey(providerSetting)
+    }
+
     override suspend fun generateText(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
@@ -69,13 +79,14 @@ class ResponseAPI(
 
         PlatformLog.i(TAG, "generateText: $encodedRequestBody")
 
+        val selectedKey = selectKey(providerSetting)
         val response = httpClient.execute(
             PlatformHttpRequest(
                 method = "POST",
                 url = "${providerSetting.baseUrl}/responses",
                 headers = params.customHeaders.toHeaderMap()
-                    .withReferHeaders(providerSetting.baseUrl)
-                    .withAuthAndJson(providerSetting.apiKey),
+                    .withReferHeaders(providerSetting.baseUrl, params.sessionId)
+                    .withAuthAndJson(selectedKey.value),
                 body = encodedRequestBody.encodeToByteArray(),
                 mediaType = "application/json",
                 proxy = providerSetting.proxy.toPlatformProxy()
@@ -83,8 +94,38 @@ class ResponseAPI(
         )
         val bodyStr = response.body.decodeToString()
         if (response.statusCode !in 200..299) {
+            when (response.statusCode) {
+                401, 403 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.AuthFailure(
+                        statusCode = response.statusCode,
+                        keyName = selectedKey.name,
+                        providerId = providerSetting.id,
+                        providerName = providerSetting.name,
+                        errorMessage = bodyStr
+                    )
+                )
+                402 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.QuotaExhausted(
+                        keyName = selectedKey.name,
+                        providerId = providerSetting.id,
+                        providerName = providerSetting.name,
+                        errorMessage = bodyStr
+                    )
+                )
+                429 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.RateLimited()
+                )
+                in 500..599 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.Error(response.statusCode, temporary = true)
+                )
+            }
             throw Exception("Failed to get response: ${response.statusCode} $bodyStr")
         }
+        keyRoulette.reportOutcome(selectedKey.id, KeyOutcome.Success)
 
         PlatformLog.i(TAG, "generateText: $bodyStr")
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
@@ -97,6 +138,16 @@ class ResponseAPI(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
+    ): Flow<MessageChunk> {
+        val selectedKey = selectKey(providerSetting)
+        return streamTextWithKey(providerSetting, messages, params, selectedKey)
+    }
+
+    private fun streamTextWithKey(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+        selectedKey: PooledKey,
     ): Flow<MessageChunk> = callbackFlow {
         val requestBody = buildRequestBody(
             messages = messages,
@@ -109,8 +160,8 @@ class ResponseAPI(
             method = "POST",
             url = "${providerSetting.baseUrl}/responses",
             headers = params.customHeaders.toHeaderMap()
-                .withReferHeaders(providerSetting.baseUrl)
-                .withAuthAndJson(providerSetting.apiKey),
+                .withReferHeaders(providerSetting.baseUrl, params.sessionId)
+                .withAuthAndJson(selectedKey.value),
             body = encodedRequestBody.encodeToByteArray(),
             mediaType = "application/json",
             proxy = providerSetting.proxy.toPlatformProxy()
@@ -118,22 +169,61 @@ class ResponseAPI(
 
         PlatformLog.i(TAG, "streamText: $encodedRequestBody")
 
+        var hasEmittedChunk = false
         val job = launch {
             httpClient.streamEvents(request).collect { event ->
                 when (event) {
                     is PlatformServerEvent.Open -> Unit
-                    PlatformServerEvent.Closed -> close()
-                    is PlatformServerEvent.Failure -> close(parseStreamFailure(event))
+                    PlatformServerEvent.Closed -> {
+                        if (hasEmittedChunk) {
+                            keyRoulette.reportOutcome(selectedKey.id, KeyOutcome.Success)
+                        }
+                        close()
+                    }
+                    is PlatformServerEvent.Failure -> {
+                        when (event.statusCode) {
+                            401, 403 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.AuthFailure(
+                                    statusCode = event.statusCode ?: 401,
+                                    keyName = selectedKey.name,
+                                    providerId = providerSetting.id,
+                                    providerName = providerSetting.name,
+                                    errorMessage = event.body ?: event.message
+                                )
+                            )
+                            402 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.QuotaExhausted(
+                                    keyName = selectedKey.name,
+                                    providerId = providerSetting.id,
+                                    providerName = providerSetting.name,
+                                    errorMessage = event.body ?: event.message
+                                )
+                            )
+                            429 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.RateLimited()
+                            )
+                            in 500..599 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.Error(event.statusCode ?: 500, temporary = true)
+                            )
+                        }
+                        close(parseStreamFailure(event))
+                    }
                     is PlatformServerEvent.Event -> {
                         PlatformLog.d(TAG, "onEvent: ${event.id}/${event.event} ${event.data}")
                         if (event.data.isNotBlank()) {
                             val eventJson = json.parseToJsonElement(event.data).jsonObject
                             val chunk = parseResponseDelta(eventJson)
                             if (chunk != null) {
+                                hasEmittedChunk = true
                                 trySend(chunk)
                             }
                         }
                         if (event.event == "response.completed") {
+                            keyRoulette.reportOutcome(selectedKey.id, KeyOutcome.Success)
                             close()
                         }
                     }
@@ -154,7 +244,7 @@ class ResponseAPI(
         }
     }
 
-    private fun buildRequestBody(
+    fun buildRequestBody(
         messages: List<UIMessage>,
         params: TextGenerationParams,
         stream: Boolean
@@ -167,7 +257,7 @@ class ResponseAPI(
         )
     }
 
-    private fun buildRequestBody(
+    fun buildRequestBody(
         messages: List<UIMessage>,
         params: TextGenerationParams,
         stream: Boolean,
@@ -234,52 +324,98 @@ class ResponseAPI(
     }
 
     private fun buildMessages(messages: List<UIMessage>) = buildJsonArray {
-        messages
-            .filter {
-                it.isValidToUpload() && it.role != MessageRole.SYSTEM
-            }
-            .forEachIndexed { _, message ->
-                if (message.role == MessageRole.TOOL) {
-                    message.getToolResults().forEach { result ->
-                        add(buildJsonObject {
-                            put("type", "function_call_output")
-                            put("call_id", result.toolCallId)
-                            put("output", json.encodeToString(result.content))
-                        })
-                    }
-                    return@forEachIndexed
+        val uploadable = messages.filter {
+            it.isValidToUpload() && it.role != MessageRole.SYSTEM
+        }
+        var i = 0
+        while (i < uploadable.size) {
+            val message = uploadable[i]
+            if (message.role == MessageRole.TOOL) {
+                val toolMessages = mutableListOf<UIMessage>()
+                while (i < uploadable.size && uploadable[i].role == MessageRole.TOOL) {
+                    toolMessages.add(uploadable[i])
+                    i++
                 }
-
-                val contentParts = buildResponseContent(message)
-                add(buildJsonObject {
-                    put("role", JsonPrimitive(message.role.name.lowercase()))
-
-                    if (message.parts.isOnlyTextPart()) {
-                        put(
-                            "content",
-                            message.parts.filterIsInstance<UIMessagePart.Text>().first().text
-                        )
-                    } else if (contentParts.isNotEmpty()) {
-                        put("content", contentParts)
+                val allToolResults = toolMessages.flatMap { it.getToolResults() }
+                allToolResults.forEach { result ->
+                    val outputStr = if (result.content is JsonPrimitive && result.content.isString) {
+                        result.content.content
                     } else {
-                        logWarning(
-                            "buildMessages: falling back to empty content for role=${message.role} parts=${message.parts}"
-                        )
-                        put("content", "")
+                        json.encodeToString(result.content)
                     }
-                })
-
-                message.getToolCalls()
-                    .takeIf { it.isNotEmpty() }
-                    ?.forEach { toolCall ->
-                        add(buildJsonObject {
-                            put("type", "function_call")
-                            put("call_id", toolCall.toolCallId)
-                            put("name", toolCall.toolName)
-                            put("arguments", toolCall.arguments)
-                        })
+                    add(buildJsonObject {
+                        put("type", "function_call_output")
+                        put("call_id", result.toolCallId)
+                        put("output", outputStr)
+                    })
+                }
+                val provenanceLines = mutableListOf<String>()
+                val encodedImages = mutableListOf<String>()
+                allToolResults.forEach { result ->
+                    val activeImages = result.inspectedImages.filter { it.url.isNotBlank() }
+                    activeImages.forEachIndexed { imgIdx, img ->
+                        mediaEncoder.encodeImage(img.url).onSuccess { base64Url ->
+                            provenanceLines.add(me.rerere.ai.ui.buildToolImageProvenanceText(result, imgIdx + 1, img))
+                            encodedImages.add(base64Url)
+                        }
                     }
+                }
+                if (encodedImages.isNotEmpty()) {
+                    val headerText = buildString {
+                        appendLine("[AUTOMATED TOOL VISUAL OUTPUT — NOT A USER MESSAGE | PRIVATE TO ASSISTANT]")
+                        appendLine("The following image(s) were returned by tool execution in this turn for your private visual inspection only. The user CANNOT see them and did NOT upload them. Do NOT refer to them as images the user sent. If the user should see an image, you MUST explicitly embed its markdown syntax (e.g. ![title](url)) in your reply; otherwise the user will see nothing.")
+                        provenanceLines.forEach { appendLine(it) }
+                    }.trim()
+                    add(buildJsonObject {
+                        put("role", "user")
+                        putJsonArray("content") {
+                            add(buildJsonObject {
+                                put("type", "input_text")
+                                put("text", headerText)
+                            })
+                            encodedImages.forEach { dataUrl ->
+                                add(buildJsonObject {
+                                    put("type", "input_image")
+                                    put("image_url", dataUrl)
+                                })
+                            }
+                        }
+                    })
+                }
+                continue
             }
+
+            val contentParts = buildResponseContent(message)
+            add(buildJsonObject {
+                put("role", JsonPrimitive(message.role.name.lowercase()))
+
+                if (message.parts.isOnlyTextPart()) {
+                    put(
+                        "content",
+                        message.parts.filterIsInstance<UIMessagePart.Text>().first().text
+                    )
+                } else if (contentParts.isNotEmpty()) {
+                    put("content", contentParts)
+                } else {
+                    logWarning(
+                        "buildMessages: falling back to empty content for role=${message.role} parts=${message.parts}"
+                    )
+                    put("content", "")
+                }
+            })
+
+            message.getToolCalls()
+                .takeIf { it.isNotEmpty() }
+                ?.forEach { toolCall ->
+                    add(buildJsonObject {
+                        put("type", "function_call")
+                        put("call_id", toolCall.toolCallId)
+                        put("name", toolCall.toolName)
+                        put("arguments", toolCall.arguments)
+                    })
+                }
+            i++
+        }
     }
 
     private fun buildResponseContent(message: UIMessage): JsonArray = buildJsonArray {
@@ -339,7 +475,7 @@ class ResponseAPI(
         }
     }
 
-    private fun parseResponseDelta(jsonObject: JsonObject): MessageChunk? {
+    fun parseResponseDelta(jsonObject: JsonObject): MessageChunk? {
         val chunkType = jsonObject["type"]?.jsonPrimitive?.content ?: error("chunk type not found")
 
         when (chunkType) {
@@ -616,7 +752,8 @@ class ResponseAPI(
             ?: jsonObject.firstPositiveIntOrNull("prompt_cache_miss_tokens")
             ?: 0
         val effectivePromptTokens = if (promptTokens > 0) {
-            promptTokens + cacheReadTokens + cacheCreationTokens
+            // OpenAI reports cache reads/writes as subsets of input_tokens, not additional input.
+            promptTokens
         } else {
             cacheReadTokens + cacheMissTokens + cacheCreationTokens
         }
@@ -687,8 +824,12 @@ private fun Map<String, String>.withAuthAndJson(apiKey: String): Map<String, Str
     )
 }
 
-private fun Map<String, String>.withReferHeaders(baseUrl: String): Map<String, String> {
-    return when (baseUrl.urlHostOrNull()) {
+private fun Map<String, String>.withReferHeaders(
+    baseUrl: String,
+    sessionId: String? = null,
+): Map<String, String> {
+    val host = baseUrl.urlHostOrNull()?.lowercase()
+    var headers = when (host) {
         "aihubmix.com" -> this + ("APP-Code" to "DKHA9468")
         "openrouter.ai" -> this + mapOf(
             "X-Title" to "LastChat",
@@ -696,6 +837,13 @@ private fun Map<String, String>.withReferHeaders(baseUrl: String): Map<String, S
         )
         else -> this
     }
+    if (host == "opencode.ai" || host?.endsWith(".opencode.ai") == true) {
+        if (headers.keys.none { it.equals("x-opencode-session", ignoreCase = true) }) {
+            val session = sessionId?.trim()?.takeIf { it.isNotEmpty() } ?: Uuid.random().toString()
+            headers = headers + ("x-opencode-session" to session)
+        }
+    }
+    return headers
 }
 
 private fun ProviderProxy.toPlatformProxy(): PlatformHttpProxy? {

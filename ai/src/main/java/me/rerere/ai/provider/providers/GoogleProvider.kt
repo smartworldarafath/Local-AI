@@ -28,6 +28,7 @@ import me.rerere.ai.core.ReasoningLevel
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
 import me.rerere.ai.provider.CustomHeader
+import me.rerere.ai.provider.ContextLimitSource
 import me.rerere.ai.provider.ImageGenerationParams
 import me.rerere.ai.provider.Modality
 import me.rerere.ai.provider.Model
@@ -36,19 +37,22 @@ import me.rerere.ai.provider.ModelType
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderProxy
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.selectProviderKey
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.provider.providers.vertex.ServiceAccountTokenProvider
 import me.rerere.ai.registry.ModelIdNormalizer
 import me.rerere.ai.registry.ModelRegistry
 import me.rerere.ai.ui.ImageAspectRatio
 import me.rerere.ai.ui.ImageGenerationItem
+import me.rerere.ai.util.KeyOutcome
+import me.rerere.ai.util.KeyRoulette
+import me.rerere.ai.util.PooledKey
 import me.rerere.ai.ui.ImageGenerationResult
 import me.rerere.ai.ui.MessageChunk
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessageAnnotation
 import me.rerere.ai.ui.UIMessageChoice
 import me.rerere.ai.ui.UIMessagePart
-import me.rerere.ai.util.KeyRoulette
 import me.rerere.ai.util.json
 import me.rerere.ai.util.mergeCustomBody
 import me.rerere.ai.util.removeElements
@@ -124,14 +128,19 @@ class GoogleProvider(
     private val mediaEncoder: PlatformMediaEncoder,
     platformJwtSigner: PlatformJwtSigner,
 ) : Provider<ProviderSetting.Google> {
+    override val supportsEmbeddings: Boolean = true
     private val keyRoulette = KeyRoulette.default()
     private val serviceAccountTokenProvider by lazy {
         ServiceAccountTokenProvider(platformHttpClient, platformJwtSigner)
     }
 
-    private fun buildUrl(providerSetting: ProviderSetting.Google, path: String): String {
+    private fun selectKey(providerSetting: ProviderSetting.Google): PooledKey {
+        return keyRoulette.selectProviderKey(providerSetting)
+    }
+
+    private fun buildUrl(providerSetting: ProviderSetting.Google, path: String, selectedKey: PooledKey? = null): String {
         return if (!providerSetting.vertexAI) {
-            val key = keyRoulette.next(providerSetting.apiKey)
+            val key = selectedKey?.value ?: selectKey(providerSetting).value
             "${providerSetting.baseUrl}/$path".appendQueryParameter("key", key)
         } else {
             "https://aiplatform.googleapis.com/v1/projects/${providerSetting.projectId}/locations/${providerSetting.location}/$path"
@@ -161,7 +170,7 @@ class GoogleProvider(
     }
 
     override suspend fun listModels(providerSetting: ProviderSetting.Google): List<Model> =
-        withContext(Dispatchers.IO) {
+        withContext(me.rerere.ai.util.providerIoDispatcher) {
             val url = buildUrl(providerSetting = providerSetting, path = "models?pageSize=100")
             val response = platformHttpClient.execute(
                 PlatformHttpRequest(
@@ -193,12 +202,17 @@ class GoogleProvider(
                     val displayName = modelObject["displayName"]?.jsonPrimitive?.contentOrNull
                         ?.ifBlank { null }
                         ?: modelId
+                    val contextLimits = parseGoogleProviderContextLimits(modelObject)
 
                     Model(
                         modelId = modelId,
                         displayName = displayName,
                         canonicalModelId = ModelIdNormalizer.canonicalize(modelId),
                         type = if ("generateContent" in supportedGenerationMethods) ModelType.CHAT else ModelType.EMBEDDING,
+                        contextWindowTokens = contextLimits.contextWindowTokens,
+                        maxInputTokens = contextLimits.maxInputTokens,
+                        maxOutputTokens = contextLimits.maxOutputTokens,
+                        contextLimitSource = contextLimits.source,
                     )
                 }
             } else {
@@ -210,16 +224,18 @@ class GoogleProvider(
         providerSetting: ProviderSetting.Google,
         messages: List<UIMessage>,
         params: TextGenerationParams,
-    ): MessageChunk = withContext(Dispatchers.IO) {
+    ): MessageChunk = withContext(me.rerere.ai.util.providerIoDispatcher) {
         val requestBody = buildCompletionRequestBody(messages, params)
 
+        val selectedKey = selectKey(providerSetting)
         val url = buildUrl(
             providerSetting = providerSetting,
             path = if (providerSetting.vertexAI) {
                 "publishers/google/models/${params.model.modelId}:generateContent"
             } else {
                 "models/${params.model.modelId}:generateContent"
-            }
+            },
+            selectedKey = selectedKey
         )
 
         val encodedRequestBody = json.encodeToString(requestBody)
@@ -240,8 +256,38 @@ class GoogleProvider(
 
         val bodyStr = response.body.decodeToString()
         if (response.statusCode !in 200..299) {
+            when (response.statusCode) {
+                401, 403 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.AuthFailure(
+                        statusCode = response.statusCode,
+                        keyName = selectedKey.name,
+                        providerId = providerSetting.id,
+                        providerName = providerSetting.name,
+                        errorMessage = bodyStr
+                    )
+                )
+                402 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.QuotaExhausted(
+                        keyName = selectedKey.name,
+                        providerId = providerSetting.id,
+                        providerName = providerSetting.name,
+                        errorMessage = bodyStr
+                    )
+                )
+                429 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.RateLimited()
+                )
+                in 500..599 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.Error(response.statusCode, temporary = true)
+                )
+            }
             throw Exception("Failed to get response: ${response.statusCode} $bodyStr")
         }
+        keyRoulette.reportOutcome(selectedKey.id, KeyOutcome.Success)
 
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
@@ -265,10 +311,58 @@ class GoogleProvider(
         messageChunk
     }
 
+    override suspend fun countInputTokens(
+        providerSetting: ProviderSetting.Google,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+    ): Int? = withContext(me.rerere.ai.util.providerIoDispatcher) {
+        val generationBody = buildCompletionRequestBody(messages, params)
+        val requestBody = buildJsonObject {
+            put("generateContentRequest", generationBody)
+        }
+        val url = buildUrl(
+            providerSetting = providerSetting,
+            path = if (providerSetting.vertexAI) {
+                "publishers/google/models/${params.model.modelId}:countTokens"
+            } else {
+                "models/${params.model.modelId}:countTokens"
+            }
+        )
+        val response = platformHttpClient.execute(
+            PlatformHttpRequest(
+                method = "POST",
+                url = url,
+                headers = buildHeaders(
+                    providerSetting = providerSetting,
+                    customHeaders = params.customHeaders,
+                    includeJsonContentType = true,
+                ),
+                body = json.encodeToString(requestBody).encodeToByteArray(),
+                mediaType = "application/json",
+                proxy = providerSetting.proxy.toPlatformProxy(),
+            )
+        )
+        if (response.statusCode !in 200..299) return@withContext null
+        json.parseToJsonElement(response.body.decodeToString()).jsonObject["totalTokens"]
+            ?.jsonPrimitiveOrNull
+            ?.intOrNull
+            ?.takeIf { it > 0 }
+    }
+
     override suspend fun streamText(
         providerSetting: ProviderSetting.Google,
         messages: List<UIMessage>,
         params: TextGenerationParams,
+    ): Flow<MessageChunk> {
+        val selectedKey = selectKey(providerSetting)
+        return streamTextWithKey(providerSetting, messages, params, selectedKey)
+    }
+
+    private fun streamTextWithKey(
+        providerSetting: ProviderSetting.Google,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+        selectedKey: PooledKey,
     ): Flow<MessageChunk> = callbackFlow {
         val requestBody = buildCompletionRequestBody(messages, params)
 
@@ -278,7 +372,8 @@ class GoogleProvider(
                 "publishers/google/models/${params.model.modelId}:streamGenerateContent"
             } else {
                 "models/${params.model.modelId}:streamGenerateContent"
-            }
+            },
+            selectedKey = selectedKey
         ).appendQueryParameter("alt", "sse")
 
         val encodedRequestBody = json.encodeToString(requestBody)
@@ -297,16 +392,56 @@ class GoogleProvider(
 
         PlatformLog.i(TAG, "streamText: $encodedRequestBody")
 
+        var hasEmittedChunk = false
         val job = launch {
             platformHttpClient.streamEvents(request).collect { event ->
                 when (event) {
                     is PlatformServerEvent.Open -> Unit
-                    PlatformServerEvent.Closed -> close()
-                    is PlatformServerEvent.Failure -> close(parseStreamFailure(event))
+                    PlatformServerEvent.Closed -> {
+                        if (hasEmittedChunk) {
+                            keyRoulette.reportOutcome(selectedKey.id, KeyOutcome.Success)
+                        }
+                        close()
+                    }
+                    is PlatformServerEvent.Failure -> {
+                        when (event.statusCode) {
+                            401, 403 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.AuthFailure(
+                                    statusCode = event.statusCode ?: 401,
+                                    keyName = selectedKey.name,
+                                    providerId = providerSetting.id,
+                                    providerName = providerSetting.name,
+                                    errorMessage = event.body ?: event.message
+                                )
+                            )
+                            402 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.QuotaExhausted(
+                                    keyName = selectedKey.name,
+                                    providerId = providerSetting.id,
+                                    providerName = providerSetting.name,
+                                    errorMessage = event.body ?: event.message
+                                )
+                            )
+                            429 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.RateLimited()
+                            )
+                            in 500..599 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.Error(event.statusCode ?: 500, temporary = true)
+                            )
+                        }
+                        close(parseStreamFailure(event))
+                    }
                     is PlatformServerEvent.Event -> {
                         PlatformLog.i(TAG, "onEvent: ${event.data}")
                         runCatching {
-                            parseStreamChunk(event.data, params.model.modelId)?.let { trySend(it) }
+                            parseStreamChunk(event.data, params.model.modelId)?.let {
+                                hasEmittedChunk = true
+                                trySend(it)
+                            }
                         }.onFailure { error ->
                             error.printStackTrace()
                             close(error)
@@ -427,8 +562,17 @@ class GoogleProvider(
 
                     val isGeminiPro =
                         params.model.modelId.contains(Regex("2\\.5.*pro", RegexOption.IGNORE_CASE))
+                    val isGemini3 = ModelRegistry.GEMINI_3_SERIES.match(modelId = params.model.modelId)
 
-                    when (params.thinkingBudget) {
+                    if (isGemini3) {
+                        when (val level = ReasoningLevel.fromBudgetTokens(params.thinkingBudget)) {
+                            ReasoningLevel.AUTO -> {}
+                            ReasoningLevel.OFF -> put("thinkingLevel", "minimal")
+                            ReasoningLevel.LOW -> put("thinkingLevel", "low")
+                            ReasoningLevel.MEDIUM -> put("thinkingLevel", "medium")
+                            ReasoningLevel.HIGH, ReasoningLevel.MAX -> put("thinkingLevel", "high")
+                        }
+                    } else when (params.thinkingBudget) {
                         null, -1 -> {} // 如果是自动，不设置thinkingBudget参数
 
                         0 -> {
@@ -439,27 +583,17 @@ class GoogleProvider(
                             }
                         }
 
-                        else -> {
-                            if(ModelRegistry.GEMINI_3_SERIES.match(modelId = params.model.modelId)) {
-                                when(val level = ReasoningLevel.fromBudgetTokens(params.thinkingBudget)) {
-                                    ReasoningLevel.HIGH -> put("thinkingLevel", "high")
-                                    ReasoningLevel.MEDIUM -> put("thinkingLevel", "high")
-                                    ReasoningLevel.LOW -> put("thinkingLevel", "low")
-                                    else -> error("Unknown reasoning level: $level")
-                                }
-                            } else {
-                                put("thinkingBudget", params.thinkingBudget)
-                            }
-                        }
+                        else -> put("thinkingBudget", params.thinkingBudget)
                     }
                 })
             }
         })
 
         // Contents (user messages)
+        val isGemini3Model = ModelRegistry.GEMINI_3_SERIES.match(modelId = params.model.modelId)
         put(
             "contents",
-            buildContents(messages)
+            buildContents(messages, isGemini3 = isGemini3Model)
         )
 
         // Tools
@@ -562,7 +696,7 @@ class GoogleProvider(
                 val functionCall = jsonObject["functionCall"]?.jsonObject
                     ?: error("No functionCall")
                 UIMessagePart.ToolCall(
-                    toolCallId = "",
+                    toolCallId = functionCall["id"]?.jsonPrimitive?.contentOrNull ?: "",
                     toolName = functionCall["name"]?.jsonPrimitive?.contentOrNull ?: "",
                     arguments = json.encodeToString(functionCall["args"] ?: JsonObject(emptyMap())),
                     metadata = buildJsonObject {
@@ -586,89 +720,180 @@ class GoogleProvider(
         }
     }
 
-    private fun buildContents(messages: List<UIMessage>): JsonArray {
+    private fun buildContents(messages: List<UIMessage>, isGemini3: Boolean = false): JsonArray {
         return buildJsonArray {
-            messages
-                .filter { it.role != MessageRole.SYSTEM && it.isValidToUpload() }
-                .forEachIndexed { index, message ->
-                    add(buildJsonObject {
-                        put("role", commonRoleToGoogleRole(message.role))
-                        putJsonArray("parts") {
-                            for (part in message.parts) {
-                                when (part) {
-                                    is UIMessagePart.Text -> {
-                                        add(buildJsonObject {
-                                            put("text", part.text)
-                                        })
-                                    }
-
-                                    is UIMessagePart.Image -> {
-                                        mediaEncoder.encodeImage(part.url, withPrefix = false).onSuccess { base64Data ->
-                                            add(buildJsonObject {
-                                                put("inline_data", buildJsonObject {
-                                                    put("mime_type", "image/png")
-                                                    put("data", base64Data)
-                                                })
-                                            })
-                                        }
-                                    }
-
-                                    is UIMessagePart.Video -> {
-                                        mediaEncoder.encodeVideo(part.url, withPrefix = false).onSuccess { base64Data ->
-                                            add(buildJsonObject {
-                                                put("inline_data", buildJsonObject {
-                                                    put("mime_type", "video/mp4")
-                                                    put("data", base64Data)
-                                                })
-                                            })
-                                        }
-                                    }
-
-                                    is UIMessagePart.Audio -> {
-                                        val mimeType = if (part.url.endsWith(".wav")) "audio/wav" 
-                                            else if (part.url.startsWith("data:audio/wav")) "audio/wav"
-                                            else "audio/mp3"
-                                        mediaEncoder.encodeAudio(part.url, withPrefix = false).onSuccess { base64Data ->
-                                            add(buildJsonObject {
-                                                put("inline_data", buildJsonObject {
-                                                    put("mime_type", mimeType)
-                                                    put("data", base64Data)
-                                                })
-                                            })
-                                        }
-                                    }
-
-                                    is UIMessagePart.ToolCall -> {
-                                        add(buildJsonObject {
-                                            put("functionCall", buildJsonObject {
-                                                put("name", part.toolName)
-                                                put("args", json.parseToJsonElement(part.arguments))
-                                            })
-                                            part.metadata?.get("thoughtSignature")?.let {
-                                                put("thoughtSignature", it)
-                                            }
-                                        })
-                                    }
-
-                                    is UIMessagePart.ToolResult -> {
+            val uploadable = messages.filter { it.role != MessageRole.SYSTEM && it.isValidToUpload() }
+            var i = 0
+            while (i < uploadable.size) {
+                val message = uploadable[i]
+                if (message.role == MessageRole.TOOL) {
+                    val toolMessages = mutableListOf<UIMessage>()
+                    while (i < uploadable.size && uploadable[i].role == MessageRole.TOOL) {
+                        toolMessages.add(uploadable[i])
+                        i++
+                    }
+                    val allResults = toolMessages.flatMap { it.getToolResults() }
+                    if (allResults.isNotEmpty()) {
+                        add(buildJsonObject {
+                            put("role", "user")
+                            putJsonArray("parts") {
+                                for (part in allResults) {
+                                    val activeImages = part.inspectedImages.filter { it.url.isNotBlank() }
+                                    if (activeImages.isEmpty()) {
                                         add(buildJsonObject {
                                             put("functionResponse", buildJsonObject {
+                                                if (part.toolCallId.isNotBlank()) {
+                                                    put("id", part.toolCallId)
+                                                }
                                                 put("name", part.toolName)
                                                 put("response", buildJsonObject {
                                                     put("result", part.content)
                                                 })
                                             })
                                         })
-                                    }
-
-                                    else -> {
-                                        // Unsupported part type
+                                    } else if (isGemini3) {
+                                        val provenanceArray = buildJsonArray {
+                                            activeImages.forEachIndexed { imgIdx, img ->
+                                                add(JsonPrimitive(me.rerere.ai.ui.buildToolImageProvenanceText(part, imgIdx + 1, img)))
+                                            }
+                                        }
+                                        add(buildJsonObject {
+                                            put("functionResponse", buildJsonObject {
+                                                if (part.toolCallId.isNotBlank()) {
+                                                    put("id", part.toolCallId)
+                                                }
+                                                put("name", part.toolName)
+                                                put("response", buildJsonObject {
+                                                    put("result", part.content)
+                                                    put("user_visibility", "PRIVATE_TO_ASSISTANT - The user cannot see these images. The user did NOT upload them. You must embed their markdown image syntax in your reply if the user should see them.")
+                                                    put("inspected_image_provenance", provenanceArray)
+                                                })
+                                                putJsonArray("parts") {
+                                                    activeImages.forEachIndexed { imgIdx, img ->
+                                                        mediaEncoder.encodeImage(img.url, withPrefix = false).onSuccess { base64Data ->
+                                                            val actualMime = me.rerere.ai.ui.extractMimeTypeFromDataUrl(img.url, img.mimeType)
+                                                            val displayName = "tool_image_${imgIdx + 1}"
+                                                            add(buildJsonObject {
+                                                                put("inlineData", buildJsonObject {
+                                                                    put("displayName", displayName)
+                                                                    put("mimeType", actualMime)
+                                                                    put("data", base64Data)
+                                                                })
+                                                            })
+                                                        }
+                                                    }
+                                                }
+                                            })
+                                        })
+                                    } else {
+                                        add(buildJsonObject {
+                                            put("functionResponse", buildJsonObject {
+                                                if (part.toolCallId.isNotBlank()) {
+                                                    put("id", part.toolCallId)
+                                                }
+                                                put("name", part.toolName)
+                                                put("response", buildJsonObject {
+                                                    put("result", part.content)
+                                                    if (activeImages.isNotEmpty()) {
+                                                        put("user_visibility", "PRIVATE_TO_ASSISTANT - The user cannot see these images. The user did NOT upload them. You must embed their markdown image syntax in your reply if the user should see them.")
+                                                    }
+                                                })
+                                            })
+                                        })
+                                        activeImages.forEachIndexed { imgIdx, img ->
+                                            val provenance = "[AUTOMATED TOOL VISUAL OUTPUT — NOT A USER MESSAGE | PRIVATE TO ASSISTANT — THE USER CANNOT SEE THIS IMAGE]\n" +
+                                                "This image was retrieved by tool execution for your private visual inspection only. The user did NOT upload it and CANNOT see it unless you embed its markdown image syntax in your reply.\n" +
+                                                me.rerere.ai.ui.buildToolImageProvenanceText(part, imgIdx + 1, img)
+                                            mediaEncoder.encodeImage(img.url, withPrefix = false).onSuccess { base64Data ->
+                                                val actualMime = me.rerere.ai.ui.extractMimeTypeFromDataUrl(img.url, img.mimeType)
+                                                add(buildJsonObject {
+                                                    put("text", provenance)
+                                                })
+                                                add(buildJsonObject {
+                                                    put("inline_data", buildJsonObject {
+                                                        put("mime_type", actualMime)
+                                                        put("data", base64Data)
+                                                    })
+                                                })
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        }
-                    })
+                        })
+                    }
+                    continue
                 }
+
+                add(buildJsonObject {
+                    put("role", commonRoleToGoogleRole(message.role))
+                    putJsonArray("parts") {
+                        for (part in message.parts) {
+                            when (part) {
+                                is UIMessagePart.Text -> {
+                                    add(buildJsonObject {
+                                        put("text", part.text)
+                                    })
+                                }
+
+                                is UIMessagePart.Image -> {
+                                    val actualMime = me.rerere.ai.ui.extractMimeTypeFromDataUrl(part.url, "image/png")
+                                    mediaEncoder.encodeImage(part.url, withPrefix = false).onSuccess { base64Data ->
+                                        add(buildJsonObject {
+                                            put("inline_data", buildJsonObject {
+                                                put("mime_type", actualMime)
+                                                put("data", base64Data)
+                                            })
+                                        })
+                                    }
+                                }
+
+                                is UIMessagePart.Video -> {
+                                    mediaEncoder.encodeVideo(part.url, withPrefix = false).onSuccess { base64Data ->
+                                        add(buildJsonObject {
+                                            put("inline_data", buildJsonObject {
+                                                put("mime_type", "video/mp4")
+                                                put("data", base64Data)
+                                            })
+                                        })
+                                    }
+                                }
+
+                                is UIMessagePart.Audio -> {
+                                    val mimeType = if (part.url.endsWith(".wav")) "audio/wav" 
+                                        else if (part.url.startsWith("data:audio/wav")) "audio/wav"
+                                        else "audio/mp3"
+                                    mediaEncoder.encodeAudio(part.url, withPrefix = false).onSuccess { base64Data ->
+                                        add(buildJsonObject {
+                                            put("inline_data", buildJsonObject {
+                                                put("mime_type", mimeType)
+                                                put("data", base64Data)
+                                            })
+                                        })
+                                    }
+                                }
+
+                                is UIMessagePart.ToolCall -> {
+                                    add(buildJsonObject {
+                                        put("functionCall", buildJsonObject {
+                                            put("name", part.toolName)
+                                            put("args", json.parseToJsonElement(part.arguments))
+                                        })
+                                        part.metadata?.get("thoughtSignature")?.let {
+                                            put("thoughtSignature", it)
+                                        }
+                                    })
+                                }
+
+                                else -> {
+                                    // Unsupported part type
+                                }
+                            }
+                        }
+                    }
+                })
+                i++
+            }
         }
     }
 
@@ -692,7 +917,7 @@ class GoogleProvider(
     override suspend fun generateImage(
         providerSetting: ProviderSetting,
         params: ImageGenerationParams
-    ): ImageGenerationResult = withContext(Dispatchers.IO) {
+    ): ImageGenerationResult = withContext(me.rerere.ai.util.providerIoDispatcher) {
         require(providerSetting is ProviderSetting.Google) {
             "Expected Google provider setting"
         }
@@ -766,7 +991,7 @@ class GoogleProvider(
         providerSetting: ProviderSetting.Google,
         input: List<String>,
         model: Model
-    ): List<List<Float>> = withContext(Dispatchers.IO) {
+    ): List<List<Float>> = withContext(me.rerere.ai.util.providerIoDispatcher) {
         if (input.isEmpty()) {
             return@withContext emptyList()
         }
@@ -896,6 +1121,36 @@ class GoogleProvider(
     }
 }
 
+internal data class GoogleProviderContextLimits(
+    val contextWindowTokens: Int? = null,
+    val maxInputTokens: Int? = null,
+    val maxOutputTokens: Int? = null,
+    val source: ContextLimitSource? = null,
+)
+
+internal fun parseGoogleProviderContextLimits(model: JsonObject): GoogleProviderContextLimits {
+    fun positiveInt(vararg keys: String): Int? = keys.firstNotNullOfOrNull { key ->
+        model[key]?.jsonPrimitiveOrNull?.contentOrNull
+            ?.toLongOrNull()
+            ?.takeIf { it in 1..Int.MAX_VALUE.toLong() }
+            ?.toInt()
+    }
+
+    val input = positiveInt("inputTokenLimit", "input_token_limit", "maxInputTokens")
+    val output = positiveInt("outputTokenLimit", "output_token_limit", "maxOutputTokens")
+    val combined = if (input != null && output != null) {
+        (input.toLong() + output.toLong()).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    } else {
+        null
+    }
+    return GoogleProviderContextLimits(
+        contextWindowTokens = combined,
+        maxInputTokens = input,
+        maxOutputTokens = output,
+        source = ContextLimitSource.PROVIDER.takeIf { input != null || output != null },
+    )
+}
+
 private fun String.appendQueryParameter(name: String, value: String): String {
     val separator = if (contains("?")) "&" else "?"
     val encodedName = name.urlEncode(spaceAsPlus = true)
@@ -907,8 +1162,12 @@ private fun List<CustomHeader>.toHeaderMap(): Map<String, String> {
     return filter { it.name.isNotBlank() }.associate { it.name to it.value }
 }
 
-private fun Map<String, String>.withReferHeaders(baseUrl: String): Map<String, String> {
-    return when (baseUrl.urlHostOrNull()) {
+private fun Map<String, String>.withReferHeaders(
+    baseUrl: String,
+    sessionId: String? = null,
+): Map<String, String> {
+    val host = baseUrl.urlHostOrNull()?.lowercase()
+    var headers = when (host) {
         "aihubmix.com" -> this + ("APP-Code" to "DKHA9468")
         "openrouter.ai" -> this + mapOf(
             "X-Title" to "LastChat",
@@ -916,6 +1175,13 @@ private fun Map<String, String>.withReferHeaders(baseUrl: String): Map<String, S
         )
         else -> this
     }
+    if (host == "opencode.ai" || host?.endsWith(".opencode.ai") == true) {
+        if (headers.keys.none { it.equals("x-opencode-session", ignoreCase = true) }) {
+            val session = sessionId?.trim()?.takeIf { it.isNotEmpty() } ?: Uuid.random().toString()
+            headers = headers + ("x-opencode-session" to session)
+        }
+    }
+    return headers
 }
 
 private fun ProviderProxy.toPlatformProxy(): PlatformHttpProxy? {

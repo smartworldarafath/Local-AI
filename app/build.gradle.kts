@@ -11,8 +11,13 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
-    alias(libs.plugins.google.services)
-    alias(libs.plugins.firebase.crashlytics)
+    alias(libs.plugins.google.services) apply false
+    alias(libs.plugins.firebase.crashlytics) apply false
+}
+
+if (file("google-services.json").exists()) {
+    apply(plugin = libs.plugins.google.services.get().pluginId)
+    apply(plugin = libs.plugins.firebase.crashlytics.get().pluginId)
 }
 
 val enableReleaseShrinker = providers.gradleProperty("lastchat.release.minify")
@@ -79,8 +84,8 @@ android {
         applicationId = "lastchat.rikkafork.cocolal"
         minSdk = 28
         targetSdk = 36
-        versionCode = 34
-        versionName = "1.2"
+        versionCode = 42
+        versionName = "1.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -89,9 +94,39 @@ android {
         }
     }
 
+    flavorDimensions += "version"
+
+    productFlavors {
+        create("stable") {
+            dimension = "version"
+        }
+        create("dev") {
+            dimension = "version"
+            applicationIdSuffix = ".dev"
+        }
+    }
+
+    // Low-RAM escape hatch: packaging 3 ABI splits + a universal APK (each
+    // ~150-250 MB with the bundled web UI) inside one Gradle daemon OOMs on
+    // 8 GB dev machines (see :app:packageStableRelease IncrementalSplitterRunnable).
+    //   -Plastchat.abi.splits=false -> single APK (all ABIs), least memory
+    // NOTE: there is intentionally no universal-only opt-out: with splits enabled
+    // but isUniversalApk=false, AGP rejects the ndk.abiFilters + splits combination
+    // ("Conflicting configuration ... cannot be present when splits abi filters
+    // are set"). CI defaults (splits + universal APK) are unchanged.
+    val disableAbiSplits = providers.gradleProperty("lastchat.abi.splits")
+        .map { it.equals("false", ignoreCase = true) }
+        .orElse(false)
+
     splits {
         abi {
-            isEnable = false
+            // AppBundle tasks usually contain "bundle" in their name
+            //noinspection WrongGradleMethod
+            val isBuildingBundle = gradle.startParameter.taskNames.any { it.lowercase().contains("bundle") }
+            isEnable = !isBuildingBundle && !disableAbiSplits.get()
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = true
         }
     }
 
@@ -184,10 +219,13 @@ android {
         generateLocaleConfig = true
     }
     applicationVariants.all {
-        outputs.configureEach {
-            (this as? com.android.build.gradle.internal.api.ApkVariantOutputImpl)?.let { output ->
-                output.outputFileName = "LocalAI_${defaultConfig.versionName}_${output.baseName}.apk"
-            }
+        outputs.all {
+            this as com.android.build.gradle.internal.api.ApkVariantOutputImpl
+
+            val variantName = baseName
+            val apkName = "LocalAI_" + defaultConfig.versionName + "_" + variantName + ".apk"
+
+            outputFileName = apkName
         }
     }
     tasks.withType<KotlinCompile>().configureEach {
@@ -211,6 +249,7 @@ tasks.register("buildAll") {
 
 tasks.named("preBuild") {
     dependsOn(buildWebUi)
+    dependsOn(":speech:downloadSherpaOnnxAar")
 }
 
 tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach {
@@ -233,6 +272,7 @@ kotlin {
 
 
 dependencies {
+    implementation(project(":ui-core"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.process)
@@ -253,12 +293,6 @@ dependencies {
 
     // Navigation 2
     implementation(libs.androidx.navigation2)
-
-    // Navigation 3
-//    implementation(libs.androidx.navigation3.runtime)
-//    implementation(libs.androidx.navigation3.ui)
-//    implementation(libs.androidx.lifecycle.viewmodel.navigation3)
-//    implementation(libs.androidx.material3.adaptive.navigation3)
 
     // Firebase (Analytics removed for privacy - only crash reporting and remote config)
     implementation(platform(libs.firebase.bom))
@@ -292,8 +326,7 @@ dependencies {
     // okhttp
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.serialization.json)
+    implementation(libs.okhttp.dnsoverhttps)
 
     // ktor client
     implementation(libs.ktor.client.core)
@@ -348,17 +381,8 @@ dependencies {
         exclude(group = "org.ogce", module = "xpp3")
     }
 
-    // Apache Commons Text
-    implementation(libs.commons.text)
-
-    // Toast (Sonner)
-    implementation(libs.sonner)
-
     // Reorderable (https://github.com/Calvin-LL/Reorderable/)
     implementation(libs.reorderable)
-
-    // lucide icons
-    implementation(libs.lucide.icons)
 
     // image viewer
     implementation(libs.image.viewer)
@@ -380,10 +404,13 @@ dependencies {
     implementation(project(":search"))
     implementation(project(":tts"))
     implementation(project(":speech"))
+    // sherpa-onnx AAR must be provided at the app level because :speech uses compileOnly
+    // (AGP forbids direct local AAR deps inside library modules)
+    implementation(files(rootProject.file("speech/build/sherpa/sherpa-onnx-1.13.4.aar")))
     implementation(project(":common"))
     implementation(project(":workspace"))
+    implementation(project(":local-llm"))
     implementation(libs.jsoup)
-    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
     implementation(kotlin("reflect"))
     implementation(libs.termux.terminal.view)
     implementation(libs.termux.terminal.emulator)
@@ -392,16 +419,12 @@ dependencies {
     implementation(libs.androidx.glance)
     implementation(libs.androidx.glance.material3)
 
-    // Leak Canary
-    // debugImplementation(libs.leakcanary.android)
-
     // tests
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
-    androidTestImplementation("io.ktor:ktor-server-sse:3.2.3")
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 }

@@ -39,6 +39,7 @@ import me.rerere.rikkahub.data.model.Lorebook
 import me.rerere.rikkahub.data.model.Mode
 import me.rerere.rikkahub.data.model.Skill
 import me.rerere.rikkahub.data.model.Tag
+import me.rerere.rikkahub.data.model.AssistantOverlayConfig
 import me.rerere.rikkahub.data.model.TextSelectionConfig
 import me.rerere.rikkahub.ui.theme.PresetThemes
 import me.rerere.rikkahub.utils.JsonInstant
@@ -148,21 +149,15 @@ class SettingsStore(
         val WEB_SERVER_ACCESS_PASSWORD = stringPreferencesKey("web_server_access_password")
         val WEB_SERVER_BACKGROUND_SETUP_SHOWN = booleanPreferencesKey("web_server_background_setup_shown")
 
-        // Background Worker
-        val CONSOLIDATION_WORKER_INTERVAL = intPreferencesKey("consolidation_worker_interval")
-        val CONSOLIDATION_REQUIRES_DEVICE_IDLE = booleanPreferencesKey("consolidation_requires_device_idle")
-
         // Prompt Injections
         val MODES = stringPreferencesKey("modes")
         val LOREBOOKS = stringPreferencesKey("lorebooks")
         val SKILLS = stringPreferencesKey("skills")
         val CHAT_STORAGE = stringPreferencesKey("chat_storage")
 
-        // Dismissed banners
-        val DISMISSED_BANNERS = stringPreferencesKey("dismissed_banners")
-
         // Android Integration
         val TEXT_SELECTION_CONFIG = stringPreferencesKey("text_selection_config")
+        val ASSISTANT_OVERLAY_CONFIG = stringPreferencesKey("assistant_overlay_config")
 
         // Local Models
         val DEVICE_PERFORMANCE_PROFILE = stringPreferencesKey("device_performance_profile")
@@ -186,47 +181,36 @@ class SettingsStore(
                 Settings(
                     setupCompleted = preferences[SETUP_COMPLETED] == true,
                     enableWebSearch = preferences[ENABLE_WEB_SEARCH] == true,
-                    favoriteModels = preferences[FAVORITE_MODELS]?.let {
-                        JsonInstant.decodeFromString(it)
-                    } ?: emptyList(),
-                    chatModelId = preferences[SELECT_MODEL]?.let { Uuid.parse(it) }
-                        ?: GEMINI_2_5_FLASH_ID,
-                    titleModelId = preferences[TITLE_MODEL]?.let { Uuid.parse(it) }
-                        ?: GEMINI_2_5_FLASH_ID,
+                    favoriteModels = decodePreferenceList(preferences[FAVORITE_MODELS]) ?: emptyList(),
+                    chatModelId = decodeUuid(preferences[SELECT_MODEL], GEMINI_2_5_FLASH_ID),
+                    titleModelId = decodeUuid(preferences[TITLE_MODEL], GEMINI_2_5_FLASH_ID),
                     titleThinkingBudget = preferences[TITLE_THINKING_BUDGET] ?: 0,
-                    summarizerModelId = preferences[SUMMARIZER_MODEL]?.let { Uuid.parse(it) },
+                    summarizerModelId = decodeUuidOrNull(preferences[SUMMARIZER_MODEL]),
                     summarizerThinkingBudget = preferences[SUMMARIZER_THINKING_BUDGET] ?: 0,
-                    subagentModelId = preferences[SUBAGENT_MODEL]?.let { Uuid.parse(it) },
+                    subagentModelId = decodeUuidOrNull(preferences[SUBAGENT_MODEL]),
                     subagentThinkingBudget = preferences[SUBAGENT_THINKING_BUDGET] ?: 0,
-                    translateModeId = preferences[TRANSLATE_MODEL]?.let { Uuid.parse(it) }
-                        ?: GEMINI_2_5_FLASH_ID,
-                    suggestionModelId = preferences[SUGGESTION_MODEL]?.let { Uuid.parse(it) }
-                        ?: GEMINI_2_5_FLASH_ID,
+                    translateModeId = decodeUuid(preferences[TRANSLATE_MODEL], GEMINI_2_5_FLASH_ID),
+                    suggestionModelId = decodeUuid(preferences[SUGGESTION_MODEL], GEMINI_2_5_FLASH_ID),
                     suggestionThinkingBudget = preferences[SUGGESTION_THINKING_BUDGET] ?: 0,
-                    imageGenerationModelId = preferences[IMAGE_GENERATION_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
+                    imageGenerationModelId = decodeUuidOrNull(preferences[IMAGE_GENERATION_MODEL])
+                        ?: Uuid.random(),
                     titlePrompt = preferences[TITLE_PROMPT] ?: DEFAULT_TITLE_PROMPT,
                     translatePrompt = preferences[TRANSLATION_PROMPT] ?: DEFAULT_TRANSLATION_PROMPT,
                     suggestionPrompt = normalizeSuggestionPrompt(
                         preferences[SUGGESTION_PROMPT] ?: DEFAULT_SUGGESTION_PROMPT
                     ),
                     learningModePrompt = preferences[LEARNING_MODE_PROMPT] ?: DEFAULT_LEARNING_MODE_PROMPT,
-                    ocrModelId = preferences[OCR_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
+                    ocrModelId = decodeUuidOrNull(preferences[OCR_MODEL]) ?: Uuid.random(),
                     ocrThinkingBudget = preferences[OCR_THINKING_BUDGET] ?: 0,
                     ocrPrompt = preferences[OCR_PROMPT] ?: DEFAULT_OCR_PROMPT,
-                    embeddingModelId = preferences[EMBEDDING_MODEL]?.let { Uuid.parse(it) } ?: Uuid.random(),
-                    assistantId = preferences[SELECT_ASSISTANT]?.let { Uuid.parse(it) }
-                        ?: DEFAULT_ASSISTANT_ID,
-                    assistantTags = preferences[ASSISTANT_TAGS]?.let {
-                        JsonInstant.decodeFromString(it)
-                    } ?: emptyList(),
-                    providerTags = preferences[PROVIDER_TAGS]?.let {
-                        JsonInstant.decodeFromString(it)
-                    } ?: emptyList(),
-                    providers = JsonInstant.decodeFromString(preferences[PROVIDERS] ?: "[]"),
-                    assistants = JsonInstant.decodeFromString(preferences[ASSISTANTS] ?: "[]"),
-                    recentlyUsedAssistants = preferences[RECENTLY_USED_ASSISTANTS]?.let {
-                        JsonInstant.decodeFromString(it)
-                    } ?: emptyList(),
+                    embeddingModelId = decodeUuidOrNull(preferences[EMBEDDING_MODEL]) ?: Uuid.random(),
+                    assistantId = decodeUuid(preferences[SELECT_ASSISTANT], DEFAULT_ASSISTANT_ID),
+                    assistantTags = decodePreferenceList(preferences[ASSISTANT_TAGS]) ?: emptyList(),
+                    providerTags = decodePreferenceList(preferences[PROVIDER_TAGS]) ?: emptyList(),
+                    providers = decodePreferenceList<ProviderSetting>(preferences[PROVIDERS]) ?: emptyList(),
+                    assistants = decodePreferenceList<Assistant>(preferences[ASSISTANTS]) ?: emptyList(),
+                    recentlyUsedAssistants = decodePreferenceList(preferences[RECENTLY_USED_ASSISTANTS])
+                        ?: emptyList(),
                     dynamicColor = preferences[DYNAMIC_COLOR] != false,
                     themeId = preferences[THEME_ID] ?: PresetThemes[0].id,
                     resourceLimitPreset = preferences[RESOURCE_LIMIT_PRESET]?.let { runCatching { ResourceLimitPreset.valueOf(it) }.getOrNull() } ?: ResourceLimitPreset.SYSTEM_RECOMMENDED,
@@ -237,33 +221,34 @@ class SettingsStore(
                     lightSliderValue = preferences[LIGHT_SLIDER_VALUE]?.toFloatOrNull() ?: 0.0f,
                     developerMode = preferences[DEVELOPER_MODE] == true,
                     enableRagLogging = preferences[ENABLE_RAG_LOGGING] == true,
-                    displaySetting = JsonInstant.decodeFromString<DisplaySetting>(
-                        preferences[DISPLAY_SETTING] ?: "{}"
+                    displaySetting = decodePreferenceValue(
+                        preferences[DISPLAY_SETTING],
+                        DisplaySetting(),
                     ).normalizeFontSettings(),
-                    searchServices = preferences[SEARCH_SERVICES]?.let {
-                        JsonInstant.decodeFromString(it)
-                    } ?: listOf(SearchServiceOptions.DEFAULT),
-                    searchCommonOptions = preferences[SEARCH_COMMON]?.let {
-                        JsonInstant.decodeFromString(it)
-                    } ?: SearchCommonOptions(),
+                    searchServices = decodePreferenceList<SearchServiceOptions>(preferences[SEARCH_SERVICES])
+                        ?: listOf(SearchServiceOptions.DEFAULT),
+                    searchCommonOptions = decodePreferenceValue(
+                        preferences[SEARCH_COMMON],
+                        SearchCommonOptions(),
+                    ),
                     searchServiceSelected = preferences[SEARCH_SELECTED] ?: 0,
-                    mcpServers = preferences[MCP_SERVERS]?.let {
-                        JsonInstant.decodeFromString(it)
-                    } ?: emptyList(),
-                    webDavConfig = preferences[WEBDAV_CONFIG]?.let {
-                        JsonInstant.decodeFromString(it)
-                    } ?: WebDavConfig(),
-                    ttsProviders = preferences[TTS_PROVIDERS]?.let {
-                        JsonInstant.decodeFromString(it)
-                    } ?: DEFAULT_TTS_PROVIDERS,
-                    selectedTTSProviderId = preferences[SELECTED_TTS_PROVIDER]?.let { Uuid.parse(it) }
-                        ?: DEFAULT_SYSTEM_TTS_ID,
-                    selectedTTSVoiceId = preferences[SELECTED_TTS_VOICE]?.let { Uuid.parse(it) }
-                        ?: DEFAULT_SYSTEM_TTS_VOICE_ID,
-                    ttsAutoplayMode = preferences[TTS_AUTOPLAY_MODE]?.let {
-                        JsonInstant.decodeFromString<TtsAutoplayMode>(it)
-                    } ?: TtsAutoplayMode.OFF,
-                    sttModelId = preferences[STT_MODEL]?.let { Uuid.parse(it) },
+                    mcpServers = decodePreferenceList(preferences[MCP_SERVERS]) ?: emptyList(),
+                    webDavConfig = decodePreferenceValue(preferences[WEBDAV_CONFIG], WebDavConfig()),
+                    ttsProviders = decodePreferenceList<TTSProviderSetting>(preferences[TTS_PROVIDERS])
+                        ?: DEFAULT_TTS_PROVIDERS,
+                    selectedTTSProviderId = decodeUuid(
+                        preferences[SELECTED_TTS_PROVIDER],
+                        DEFAULT_SYSTEM_TTS_ID,
+                    ),
+                    selectedTTSVoiceId = decodeUuid(
+                        preferences[SELECTED_TTS_VOICE],
+                        DEFAULT_SYSTEM_TTS_VOICE_ID,
+                    ),
+                    ttsAutoplayMode = decodePreferenceValue(
+                        preferences[TTS_AUTOPLAY_MODE],
+                        TtsAutoplayMode.OFF,
+                    ),
+                    sttModelId = decodeUuidOrNull(preferences[STT_MODEL]),
                     sttThinkingBudget = preferences[STT_THINKING_BUDGET] ?: 0,
                     sttPrompt = preferences[STT_PROMPT] ?: me.rerere.rikkahub.data.ai.prompts.DEFAULT_STT_PROMPT,
                     webServerEnabled = preferences[WEB_SERVER_ENABLED] == true,
@@ -271,30 +256,26 @@ class SettingsStore(
                     webServerJwtEnabled = preferences[WEB_SERVER_JWT_ENABLED] == true,
                     webServerAccessPassword = preferences[WEB_SERVER_ACCESS_PASSWORD] ?: "",
                     webServerBackgroundSetupShown = preferences[WEB_SERVER_BACKGROUND_SETUP_SHOWN] == true,
-                    consolidationWorkerIntervalMinutes = preferences[CONSOLIDATION_WORKER_INTERVAL] ?: 15,
-                    consolidationRequiresDeviceIdle = preferences[CONSOLIDATION_REQUIRES_DEVICE_IDLE] ?: false,
-                    modes = preferences[MODES]?.let {
-                        JsonInstant.decodeFromString(it)
-                    } ?: emptyList(),
-                    lorebooks = preferences[LOREBOOKS]?.let {
-                        JsonInstant.decodeFromString(it)
-                    } ?: emptyList(),
-                    skills = preferences[SKILLS]?.let {
-                        JsonInstant.decodeFromString(it)
-                    } ?: emptyList(),
-                    chatStorage = preferences[CHAT_STORAGE]?.let {
-                        JsonInstant.decodeFromString<ChatStorageSettings>(it)
-                    } ?: ChatStorageSettings(),
-                    dismissedBanners = preferences[DISMISSED_BANNERS]?.let {
-                        JsonInstant.decodeFromString(it)
-                    } ?: emptySet(),
-                    textSelectionConfig = preferences[TEXT_SELECTION_CONFIG]?.let {
-                        JsonInstant.decodeFromString(it)
-                    } ?: TextSelectionConfig(),
+                    modes = decodePreferenceList(preferences[MODES]) ?: emptyList(),
+                    lorebooks = decodePreferenceList(preferences[LOREBOOKS]) ?: emptyList(),
+                    skills = decodePreferenceList(preferences[SKILLS]) ?: emptyList(),
+                    chatStorage = decodePreferenceValue(
+                        preferences[CHAT_STORAGE],
+                        ChatStorageSettings(),
+                    ),
+                    textSelectionConfig = decodePreferenceValue(
+                        preferences[TEXT_SELECTION_CONFIG],
+                        TextSelectionConfig(),
+                    ),
+                    assistantOverlayConfig = decodePreferenceValue(
+                        preferences[ASSISTANT_OVERLAY_CONFIG],
+                        AssistantOverlayConfig(),
+                    ),
                 ).normalizeThemeId()
             }.getOrElse {
                 Log.e(TAG, "Failed to parse settings", it)
-                Settings().copy(init = false)
+                // init=true so SettingsStore.update will refuse to persist dummy defaults
+                Settings.dummy()
             }
         }
         .map {
@@ -329,6 +310,7 @@ class SettingsStore(
                 ttsProviders = ttsProviders,
                 selectedTTSVoiceId = selectedTtsVoiceId,
             ).normalizeWebServerSettings().normalizeFontSettings().normalizeTtsSettings()
+                .normalizeLocalProvider().normalizeSearchServices().normalizeMemorySettings()
         }
         .map { settings ->
             // 去重并清理无效引用
@@ -353,6 +335,10 @@ class SettingsStore(
                         is ProviderSetting.ComfyUI -> provider.copy(
                             models = provider.models.distinctBy { model -> model.id }
                                 .map { model -> model.withComfyDefaults() }
+                        )
+
+                        is ProviderSetting.LiteRtLocal -> provider.copy(
+                            models = provider.models.distinctBy { model -> model.id }
                         )
                     }
                 },
@@ -506,6 +492,10 @@ class SettingsStore(
             .normalizeFontSettings()
             .normalizeThemeId()
             .normalizeTtsSettings()
+            .normalizeLocalProvider()
+            .normalizeSearchServices()
+            .normalizeMemorySettings()
+            .clearMissingModelReferences()
 
         // Handle explicit secret deletions (user cleared a field that had a value)
         // This must be called BEFORE migration to remove deleted secrets from SecureStore
@@ -568,7 +558,11 @@ class SettingsStore(
 
             preferences[SEARCH_SERVICES] = JsonInstant.encodeToString(normalizedSettings.searchServices)
             preferences[SEARCH_COMMON] = JsonInstant.encodeToString(normalizedSettings.searchCommonOptions)
-            preferences[SEARCH_SELECTED] = normalizedSettings.searchServiceSelected.coerceIn(0, normalizedSettings.searchServices.size - 1)
+            preferences[SEARCH_SELECTED] = if (normalizedSettings.searchServices.isEmpty()) {
+                0
+            } else {
+                normalizedSettings.searchServiceSelected.coerceIn(0, normalizedSettings.searchServices.size - 1)
+            }
 
             preferences[MCP_SERVERS] = JsonInstant.encodeToString(normalizedSettings.mcpServers)
             preferences[WEBDAV_CONFIG] = JsonInstant.encodeToString(migratedSettings.webDavConfig)
@@ -589,15 +583,12 @@ class SettingsStore(
             preferences[WEB_SERVER_ACCESS_PASSWORD] = normalizedSettings.webServerAccessPassword
             preferences[WEB_SERVER_BACKGROUND_SETUP_SHOWN] = normalizedSettings.webServerBackgroundSetupShown
 
-            preferences[CONSOLIDATION_WORKER_INTERVAL] = normalizedSettings.consolidationWorkerIntervalMinutes
-            preferences[CONSOLIDATION_REQUIRES_DEVICE_IDLE] = normalizedSettings.consolidationRequiresDeviceIdle
-
             preferences[MODES] = JsonInstant.encodeToString(normalizedSettings.modes)
             preferences[LOREBOOKS] = JsonInstant.encodeToString(normalizedSettings.lorebooks)
             preferences[SKILLS] = JsonInstant.encodeToString(normalizedSettings.skills)
             preferences[CHAT_STORAGE] = JsonInstant.encodeToString(normalizedSettings.chatStorage)
-            preferences[DISMISSED_BANNERS] = JsonInstant.encodeToString(normalizedSettings.dismissedBanners)
             preferences[TEXT_SELECTION_CONFIG] = JsonInstant.encodeToString(normalizedSettings.textSelectionConfig)
+            preferences[ASSISTANT_OVERLAY_CONFIG] = JsonInstant.encodeToString(normalizedSettings.assistantOverlayConfig)
         }
     }
 

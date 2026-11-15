@@ -1,10 +1,5 @@
 package me.rerere.rikkahub.ui.pages.assistant.detail
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +18,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import me.rerere.rikkahub.ui.components.ui.HapticSwitch
 import me.rerere.rikkahub.ui.components.ui.DebouncedTextField
+import me.rerere.rikkahub.ui.motion.ExpandableContent
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -62,6 +58,9 @@ fun AssistantModelSubPage(
     onUpdate: (Assistant) -> Unit
 ) {
     var maxTokensPending by remember { mutableStateOf(false) }
+    val currentModel = remember(assistant.chatModelId, providers) {
+        providers.flatMap { it.models }.firstOrNull { it.id == assistant.chatModelId }
+    }
 
     Column(
         modifier = Modifier
@@ -202,11 +201,7 @@ fun AssistantModelSubPage(
             )
             
             // Temperature Slider
-            AnimatedVisibility(
-                visible = assistant.temperature != null,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
+            ExpandableContent(visible = assistant.temperature != null) {
                 Surface(
                     color = if (LocalDarkMode.current) 
                         MaterialTheme.colorScheme.surfaceContainerLow 
@@ -265,11 +260,7 @@ fun AssistantModelSubPage(
             )
 
             // Top-P Slider
-            AnimatedVisibility(
-                visible = assistant.topP != null,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
+            ExpandableContent(visible = assistant.topP != null) {
                 Surface(
                     color = if (LocalDarkMode.current) 
                         MaterialTheme.colorScheme.surfaceContainerLow 
@@ -315,9 +306,11 @@ fun AssistantModelSubPage(
                     ReasoningLevel.LOW -> stringResource(R.string.reasoning_light)
                     ReasoningLevel.MEDIUM -> stringResource(R.string.reasoning_medium)
                     ReasoningLevel.HIGH -> stringResource(R.string.reasoning_heavy)
+                    ReasoningLevel.MAX -> "Max"
                 },
                 trailing = {
                     ReasoningButton(
+                        model = currentModel,
                         reasoningTokens = assistant.thinkingBudget ?: 0,
                         onUpdateReasoningTokens = { tokens ->
                             onUpdate(assistant.copy(thinkingBudget = tokens))

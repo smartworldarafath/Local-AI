@@ -59,6 +59,5 @@ fun findPresetTheme(id: String, customThemes: List<me.rerere.rikkahub.data.datas
         )
     }
 
-    return SeafoamMintThemePreset
+    return SakuraThemePreset
 }
-

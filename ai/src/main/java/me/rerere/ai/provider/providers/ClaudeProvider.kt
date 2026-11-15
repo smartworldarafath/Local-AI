@@ -32,6 +32,7 @@ import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.Provider
 import me.rerere.ai.provider.ProviderProxy
 import me.rerere.ai.provider.ProviderSetting
+import me.rerere.ai.provider.selectProviderKey
 import me.rerere.ai.provider.TextGenerationParams
 import me.rerere.ai.ui.ImageGenerationResult
 import me.rerere.ai.ui.MessageChunk
@@ -51,6 +52,10 @@ import me.rerere.common.platform.PlatformServerEvent
 import kotlin.time.Clock
 import kotlin.uuid.Uuid
 
+import me.rerere.ai.util.KeyOutcome
+import me.rerere.ai.util.KeyRoulette
+import me.rerere.ai.util.PooledKey
+
 private const val TAG = "ClaudeProvider"
 private const val ANTHROPIC_VERSION = "2023-06-01"
 
@@ -63,14 +68,20 @@ class ClaudeProvider(
     private val platformHttpClient: PlatformHttpClient,
     private val mediaEncoder: PlatformMediaEncoder,
 ) : Provider<ProviderSetting.Claude> {
+    private val keyRoulette = KeyRoulette.default()
+
+    private fun selectKey(providerSetting: ProviderSetting.Claude): PooledKey {
+        return keyRoulette.selectProviderKey(providerSetting)
+    }
     override suspend fun listModels(providerSetting: ProviderSetting.Claude): List<Model> =
-        withContext(Dispatchers.IO) {
+        withContext(me.rerere.ai.util.providerIoDispatcher) {
+            val key = selectKey(providerSetting).value
             val response = platformHttpClient.execute(
                 PlatformHttpRequest(
                     method = "GET",
                     url = "${providerSetting.baseUrl}/models",
                     headers = mapOf(
-                        "x-api-key" to providerSetting.apiKey,
+                        "x-api-key" to key,
                         "anthropic-version" to ANTHROPIC_VERSION
                     ),
                     proxy = providerSetting.proxy.toPlatformProxy()
@@ -108,19 +119,20 @@ class ClaudeProvider(
         providerSetting: ProviderSetting.Claude,
         messages: List<UIMessage>,
         params: TextGenerationParams
-    ): MessageChunk = withContext(Dispatchers.IO) {
+    ): MessageChunk = withContext(me.rerere.ai.util.providerIoDispatcher) {
         val requestBody = buildMessageRequest(messages, params)
         val encodedRequestBody = json.encodeToString(requestBody)
 
         PlatformLog.i(TAG, "generateText: $encodedRequestBody")
 
+        val selectedKey = selectKey(providerSetting)
         val response = platformHttpClient.execute(
             PlatformHttpRequest(
                 method = "POST",
                 url = "${providerSetting.baseUrl}/messages",
                 headers = params.customHeaders.toHeaderMap()
-                    .withReferHeaders(providerSetting.baseUrl)
-                    .withClaudeHeaders(providerSetting.apiKey),
+                    .withReferHeaders(providerSetting.baseUrl, params.sessionId)
+                    .withClaudeHeaders(selectedKey.value),
                 body = encodedRequestBody.encodeToByteArray(),
                 mediaType = "application/json",
                 proxy = providerSetting.proxy.toPlatformProxy()
@@ -128,8 +140,38 @@ class ClaudeProvider(
         )
         val bodyStr = response.body.decodeToString()
         if (response.statusCode !in 200..299) {
+            when (response.statusCode) {
+                401, 403 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.AuthFailure(
+                        statusCode = response.statusCode,
+                        keyName = selectedKey.name,
+                        providerId = providerSetting.id,
+                        providerName = providerSetting.name,
+                        errorMessage = bodyStr
+                    )
+                )
+                402 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.QuotaExhausted(
+                        keyName = selectedKey.name,
+                        providerId = providerSetting.id,
+                        providerName = providerSetting.name,
+                        errorMessage = bodyStr
+                    )
+                )
+                429 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.RateLimited()
+                )
+                in 500..599 -> keyRoulette.reportOutcome(
+                    selectedKey.id,
+                    KeyOutcome.Error(response.statusCode, temporary = true)
+                )
+            }
             throw Exception("Failed to get response: ${response.statusCode} $bodyStr")
         }
+        keyRoulette.reportOutcome(selectedKey.id, KeyOutcome.Success)
 
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
@@ -155,10 +197,51 @@ class ClaudeProvider(
         )
     }
 
+    override suspend fun countInputTokens(
+        providerSetting: ProviderSetting.Claude,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+    ): Int? = withContext(me.rerere.ai.util.providerIoDispatcher) {
+        val generationBody = buildMessageRequest(messages, params)
+        val requestBody = buildJsonObject {
+            generationBody.forEach { (key, value) ->
+                if (key !in setOf("stream", "max_tokens", "temperature", "top_p")) put(key, value)
+            }
+        }
+        val key = selectKey(providerSetting).value
+        val response = platformHttpClient.execute(
+            PlatformHttpRequest(
+                method = "POST",
+                url = "${providerSetting.baseUrl}/messages/count_tokens",
+                headers = params.customHeaders.toHeaderMap()
+                    .withReferHeaders(providerSetting.baseUrl, params.sessionId)
+                    .withClaudeHeaders(key),
+                body = json.encodeToString(requestBody).encodeToByteArray(),
+                mediaType = "application/json",
+                proxy = providerSetting.proxy.toPlatformProxy(),
+            )
+        )
+        if (response.statusCode !in 200..299) return@withContext null
+        json.parseToJsonElement(response.body.decodeToString()).jsonObject["input_tokens"]
+            ?.jsonPrimitive
+            ?.intOrNull
+            ?.takeIf { it > 0 }
+    }
+
     override suspend fun streamText(
         providerSetting: ProviderSetting.Claude,
         messages: List<UIMessage>,
         params: TextGenerationParams
+    ): Flow<MessageChunk> {
+        val selectedKey = selectKey(providerSetting)
+        return streamTextWithKey(providerSetting, messages, params, selectedKey)
+    }
+
+    private fun streamTextWithKey(
+        providerSetting: ProviderSetting.Claude,
+        messages: List<UIMessage>,
+        params: TextGenerationParams,
+        selectedKey: PooledKey,
     ): Flow<MessageChunk> = callbackFlow {
         val requestBody = buildMessageRequest(messages, params, stream = true)
         val encodedRequestBody = json.encodeToString(requestBody)
@@ -166,8 +249,8 @@ class ClaudeProvider(
             method = "POST",
             url = "${providerSetting.baseUrl}/messages",
             headers = params.customHeaders.toHeaderMap()
-                .withReferHeaders(providerSetting.baseUrl)
-                .withClaudeHeaders(providerSetting.apiKey),
+                .withReferHeaders(providerSetting.baseUrl, params.sessionId)
+                .withClaudeHeaders(selectedKey.value),
             body = encodedRequestBody.encodeToByteArray(),
             mediaType = "application/json",
             proxy = providerSetting.proxy.toPlatformProxy()
@@ -179,16 +262,54 @@ class ClaudeProvider(
             PlatformLog.i(TAG, "streamText: $it")
         }
 
+        var hasEmittedChunk = false
         val job = launch {
             platformHttpClient.streamEvents(request).collect { event ->
                 when (event) {
                     is PlatformServerEvent.Open -> Unit
-                    PlatformServerEvent.Closed -> close()
-                    is PlatformServerEvent.Failure -> close(parseStreamFailure(event))
+                    PlatformServerEvent.Closed -> {
+                        if (hasEmittedChunk) {
+                            keyRoulette.reportOutcome(selectedKey.id, KeyOutcome.Success)
+                        }
+                        close()
+                    }
+                    is PlatformServerEvent.Failure -> {
+                        when (event.statusCode) {
+                            401, 403 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.AuthFailure(
+                                    statusCode = event.statusCode ?: 401,
+                                    keyName = selectedKey.name,
+                                    providerId = providerSetting.id,
+                                    providerName = providerSetting.name,
+                                    errorMessage = event.body ?: event.message
+                                )
+                            )
+                            402 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.QuotaExhausted(
+                                    keyName = selectedKey.name,
+                                    providerId = providerSetting.id,
+                                    providerName = providerSetting.name,
+                                    errorMessage = event.body ?: event.message
+                                )
+                            )
+                            429 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.RateLimited()
+                            )
+                            in 500..599 -> keyRoulette.reportOutcome(
+                                selectedKey.id,
+                                KeyOutcome.Error(event.statusCode ?: 500, temporary = true)
+                            )
+                        }
+                        close(parseStreamFailure(event))
+                    }
                     is PlatformServerEvent.Event -> {
                         PlatformLog.d(TAG, "onEvent: type=${event.event}, data=${event.data}")
                         if (event.event == "message_stop") {
                             PlatformLog.d(TAG, "Stream ended")
+                            keyRoulette.reportOutcome(selectedKey.id, KeyOutcome.Success)
                             close()
                             return@collect
                         }
@@ -198,7 +319,9 @@ class ClaudeProvider(
                             return@collect
                         }
                         runCatching {
-                            trySend(parseStreamChunk(event))
+                            val chunk = parseStreamChunk(event)
+                            hasEmittedChunk = true
+                            trySend(chunk)
                         }.onFailure { error ->
                             close(error)
                         }
@@ -293,28 +416,78 @@ class ClaudeProvider(
     }
 
     private fun buildMessages(messages: List<UIMessage>, cacheMessageIds: Set<Uuid>) = buildJsonArray {
-        messages
-            .filter { it.isValidToUpload() && it.role != MessageRole.SYSTEM }
-            .forEach { message ->
-                if (message.role == MessageRole.TOOL) {
-                    val toolResults = message.getToolResults()
-                    toolResults.forEachIndexed { index, result ->
-                        add(buildJsonObject {
-                            put("role", "user")
-                            putJsonArray("content") {
+        val uploadable = messages.filter { it.isValidToUpload() && it.role != MessageRole.SYSTEM }
+        var i = 0
+        while (i < uploadable.size) {
+            val message = uploadable[i]
+            if (message.role == MessageRole.TOOL) {
+                val toolMessages = mutableListOf<UIMessage>()
+                while (i < uploadable.size && uploadable[i].role == MessageRole.TOOL) {
+                    toolMessages.add(uploadable[i])
+                    i++
+                }
+                val allToolResults = toolMessages.flatMap { it.getToolResults() }
+                if (allToolResults.isNotEmpty()) {
+                    val hasAnyCacheBreakpoint = toolMessages.any { it.id in cacheMessageIds }
+                    add(buildJsonObject {
+                        put("role", "user")
+                        putJsonArray("content") {
+                            allToolResults.forEachIndexed { index, result ->
+                                val activeImages = result.inspectedImages.filter { it.url.isNotBlank() }
+                                val baseContent = if (result.content is JsonPrimitive && result.content.isString) {
+                                    result.content.content
+                                } else {
+                                    json.encodeToString(result.content)
+                                }
                                 add(buildJsonObject {
                                     put("type", "tool_result")
                                     put("tool_use_id", result.toolCallId)
-                                    put("content", json.encodeToString(result.content))
-                                    if (message.id in cacheMessageIds && index == toolResults.lastIndex) {
+                                    if (activeImages.isEmpty()) {
+                                        put("content", baseContent)
+                                    } else {
+                                        putJsonArray("content") {
+                                            val textHeader = buildString {
+                                                append(baseContent)
+                                                append("\n\n[AUTOMATED TOOL VISUAL OUTPUT — NOT A USER MESSAGE | PRIVATE TO ASSISTANT]\n")
+                                                appendLine("The following image(s) were returned by tool execution in this turn for your private visual inspection only. The user CANNOT see them and did NOT upload them. Do NOT refer to them as images the user sent. If the user should see an image, you MUST explicitly embed its markdown syntax (e.g. ![title](url)) in your reply; otherwise the user will see nothing.")
+                                                activeImages.forEachIndexed { imgIdx, img ->
+                                                    appendLine(me.rerere.ai.ui.buildToolImageProvenanceText(result, imgIdx + 1, img))
+                                                }
+                                            }.trim()
+                                            add(buildJsonObject {
+                                                put("type", "text")
+                                                put("text", textHeader)
+                                            })
+                                            activeImages.forEach { img ->
+                                                mediaEncoder.encodeImage(img.url).onSuccess { base64Data ->
+                                                    val actualMime = me.rerere.ai.ui.extractMimeTypeFromDataUrl(
+                                                        base64Data,
+                                                        me.rerere.ai.ui.extractMimeTypeFromDataUrl(img.url, img.mimeType)
+                                                    )
+                                                    add(buildJsonObject {
+                                                        put("type", "image")
+                                                        put("source", buildJsonObject {
+                                                            put("type", "base64")
+                                                            put("media_type", actualMime)
+                                                            put("data", base64Data.substringAfter(","))
+                                                        })
+                                                    })
+                                                }.onFailure {
+                                                    PlatformLog.w(TAG, "encode tool image failed: ${img.sourceUrl ?: img.title}")
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (hasAnyCacheBreakpoint && index == allToolResults.lastIndex) {
                                         put("cache_control", buildPromptCacheControl())
                                     }
                                 })
                             }
-                        })
-                    }
-                    return@forEach
+                        }
+                    })
                 }
+                continue
+            }
 
                 add(buildJsonObject {
                     // role
@@ -344,13 +517,17 @@ class ClaudeProvider(
                                 is UIMessagePart.Image -> {
                                     add(buildJsonObject {
                                         mediaEncoder.encodeImage(part.url).onSuccess { base64Data ->
+                                            val actualMime = me.rerere.ai.ui.extractMimeTypeFromDataUrl(
+                                                base64Data,
+                                                me.rerere.ai.ui.extractMimeTypeFromDataUrl(part.url, "image/jpeg")
+                                            )
                                             put("type", "image")
                                             put("source", buildJsonObject {
                                                 put("type", "base64")
                                                 put(
                                                     "media_type",
-                                                    "image/jpeg"
-                                                ) // 默认为 jpeg，可能需要根据实际情况调整
+                                                    actualMime
+                                                )
                                                 put(
                                                     "data",
                                                     base64Data.substringAfter(",")
@@ -395,6 +572,7 @@ class ClaudeProvider(
                         }
                     }
                 })
+                i++
             }
     }
 
@@ -570,8 +748,12 @@ private fun Map<String, String>.withClaudeHeaders(apiKey: String): Map<String, S
     )
 }
 
-private fun Map<String, String>.withReferHeaders(baseUrl: String): Map<String, String> {
-    return when (baseUrl.urlHostOrNull()) {
+private fun Map<String, String>.withReferHeaders(
+    baseUrl: String,
+    sessionId: String? = null,
+): Map<String, String> {
+    val host = baseUrl.urlHostOrNull()?.lowercase()
+    var headers = when (host) {
         "aihubmix.com" -> this + ("APP-Code" to "DKHA9468")
         "openrouter.ai" -> this + mapOf(
             "X-Title" to "LastChat",
@@ -579,6 +761,13 @@ private fun Map<String, String>.withReferHeaders(baseUrl: String): Map<String, S
         )
         else -> this
     }
+    if (host == "opencode.ai" || host?.endsWith(".opencode.ai") == true) {
+        if (headers.keys.none { it.equals("x-opencode-session", ignoreCase = true) }) {
+            val session = sessionId?.trim()?.takeIf { it.isNotEmpty() } ?: Uuid.random().toString()
+            headers = headers + ("x-opencode-session" to session)
+        }
+    }
+    return headers
 }
 
 private fun ProviderProxy.toPlatformProxy(): PlatformHttpProxy? {

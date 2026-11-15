@@ -45,7 +45,7 @@ val repositoryModule = module {
     }
 
     single {
-        MemoryRepository(get(), get(), get(), get())
+        MemoryRepository(get(), get(), get(), get(), get())
     }
 
     single {
@@ -86,6 +86,13 @@ val repositoryModule = module {
             settingsStore = get(),
             manager = get(),
             rootfsInstaller = get(),
+        )
+    }
+
+    single {
+        me.rerere.rikkahub.service.workspace.WorkspaceEnvironmentManager(
+            context = get(),
+            workspaceRepository = get(),
         )
     }
 }

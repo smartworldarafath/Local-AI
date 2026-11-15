@@ -7,7 +7,7 @@ import me.rerere.rikkahub.data.datastore.DisplaySetting
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.Conversation
-import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.ai.ui.MessageNode
 import me.rerere.rikkahub.service.ChatPersistenceMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -157,14 +157,28 @@ class ChatPageTest {
 
     @Test
     fun chatListPaddingSwitchesWithToolbarPlacement() {
-        assertEquals(88.dp, chatListTopPadding(chatTopBarPlacement(Settings())))
+        val statusBarPadding = 24.dp
+        assertEquals(120.dp, chatListTopPadding(chatTopBarPlacement(Settings()), statusBarPadding))
         assertEquals(140.dp, chatListBottomPadding(chatTopBarPlacement(Settings())))
 
         val bottomPlacement = chatTopBarPlacement(
             Settings(displaySetting = DisplaySetting(chatToolbarAtBottom = true))
         )
-        assertEquals(16.dp, chatListTopPadding(bottomPlacement))
+        assertEquals(60.dp, chatListTopPadding(bottomPlacement, statusBarPadding))
         assertEquals(204.dp, chatListBottomPadding(bottomPlacement))
+    }
+
+    @Test
+    fun contextPopupUsesTheSameToolbarClearanceAsTheChatDropdown() {
+        val topPlacement = chatTopBarPlacement(Settings())
+        assertEquals(64.dp, chatToolbarPopupTopPadding(topPlacement))
+        assertEquals(0.dp, chatToolbarPopupBottomPadding(topPlacement))
+
+        val bottomPlacement = chatTopBarPlacement(
+            Settings(displaySetting = DisplaySetting(chatToolbarAtBottom = true))
+        )
+        assertEquals(0.dp, chatToolbarPopupTopPadding(bottomPlacement))
+        assertEquals(72.dp, chatToolbarPopupBottomPadding(bottomPlacement))
     }
 
     @Test
@@ -221,5 +235,56 @@ class ChatPageTest {
             ChatSessionDraftStore.get(toId)
         )
         ChatSessionDraftStore.clear()
+    }
+
+    @Test
+    fun characterIntroTurnsDoNotOfferRegenerate() {
+        assertFalse(
+            shouldOfferMessageRegenerate(
+                role = me.rerere.ai.core.MessageRole.ASSISTANT,
+                isLastTurn = true,
+                previousGroup = null,
+            )
+        )
+        assertTrue(
+            shouldOfferMessageRegenerate(
+                role = me.rerere.ai.core.MessageRole.ASSISTANT,
+                isLastTurn = true,
+                previousGroup = me.rerere.rikkahub.ui.components.chat.MessageTurnGroup(
+                    nodes = listOf(MessageNode.of(UIMessage.user("Hi"))),
+                    role = me.rerere.ai.core.MessageRole.USER,
+                ),
+            )
+        )
+    }
+
+    @Test
+    fun characterIntroMessagesAreDetectedBeforeAnyUserTurn() {
+        val intro = UIMessage.assistant("Hello there")
+        val user = UIMessage.user("Hi")
+        val reply = UIMessage.assistant("Welcome")
+        assertTrue(isCharacterIntroMessage(listOf(intro, user, reply), intro))
+        assertFalse(isCharacterIntroMessage(listOf(intro, user, reply), reply))
+    }
+
+    @Test
+    fun unreadDotIsNotAddedForTheConversationCurrentlyBeingViewed() {
+        val viewing = Uuid.random()
+        val other = Uuid.random()
+        assertTrue(
+            completedGenerationIdsAfterDone(
+                currentCompleted = emptySet(),
+                finishedConversationId = viewing,
+                viewingConversationId = viewing,
+            ).isEmpty()
+        )
+        assertEquals(
+            setOf(other),
+            completedGenerationIdsAfterDone(
+                currentCompleted = emptySet(),
+                finishedConversationId = other,
+                viewingConversationId = viewing,
+            )
+        )
     }
 }

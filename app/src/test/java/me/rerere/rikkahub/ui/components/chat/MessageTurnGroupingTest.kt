@@ -2,7 +2,7 @@ package me.rerere.rikkahub.ui.components.chat
 
 import me.rerere.ai.core.MessageRole
 import me.rerere.ai.ui.UIMessage
-import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.ai.ui.MessageNode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -65,5 +65,40 @@ class MessageTurnGroupingTest {
             .single()
 
         assertEquals(canonicalVersionNode.id, group.nodeWithMostVersions.id)
+    }
+
+    @Test
+    fun groupIntoTurnsKeepsToolResultsWithInspectedImagesInsideAssistantTurn() {
+        val groups = listOf(
+            MessageNode.of(UIMessage.user("Show me a chart")),
+            MessageNode.of(UIMessage.assistant("Generating chart...")),
+            MessageNode.of(
+                UIMessage(
+                    role = MessageRole.TOOL,
+                    parts = listOf(
+                        me.rerere.ai.ui.UIMessagePart.ToolResult(
+                            toolCallId = "c1",
+                            toolName = "workspace_view_image",
+                            content = kotlinx.serialization.json.buildJsonObject { },
+                            arguments = kotlinx.serialization.json.buildJsonObject { },
+                            inspectedImages = listOf(
+                                me.rerere.ai.ui.ToolResultImage(
+                                    url = "",
+                                    title = "chart.png",
+                                )
+                            )
+                        )
+                    ),
+                )
+            ),
+            MessageNode.of(UIMessage.assistant("Here is the completed chart")),
+            MessageNode.of(UIMessage.user("Thanks, now do another")),
+        ).groupIntoTurns()
+
+        assertEquals(3, groups.size)
+        assertEquals(MessageRole.USER, groups[0].role)
+        assertEquals(MessageRole.ASSISTANT, groups[1].role)
+        assertEquals(3, groups[1].nodes.size)
+        assertEquals(MessageRole.USER, groups[2].role)
     }
 }

@@ -102,6 +102,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloatAsState
 import me.rerere.rikkahub.ui.components.ui.ItemPosition
+import me.rerere.rikkahub.ui.components.ui.listItemShape
+import me.rerere.rikkahub.ui.components.ui.LastChatDestructiveConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.PhysicsSwipeToDelete
 import me.rerere.rikkahub.ui.hooks.HapticPattern
 import me.rerere.rikkahub.ui.hooks.rememberPremiumHaptics
@@ -233,6 +235,49 @@ fun SettingTTSPage(vm: SettingVM = koinViewModel()) {
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 state = lazyListState
             ) {
+                if (settings.ttsProviders.isEmpty()) {
+                    item(key = "empty") {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (LocalDarkMode.current) {
+                                    MaterialTheme.colorScheme.surfaceContainerLow
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainerHighest
+                                }
+                            ),
+                            shape = AppShapes.CardLarge
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Rounded.VolumeUp,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(48.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.setting_tts_page_empty_title),
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.setting_tts_page_empty_desc),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
                 itemsIndexed(settings.ttsProviders, key = { _, provider -> provider.id }) { index, provider ->
                 val position = when {
                     settings.ttsProviders.size == 1 -> ItemPosition.ONLY
@@ -329,6 +374,7 @@ fun SettingTTSPage(vm: SettingVM = koinViewModel()) {
                     }
                 }
                 }
+                }
             }
 
             Box(
@@ -347,53 +393,40 @@ fun SettingTTSPage(vm: SettingVM = koinViewModel()) {
             )
         }
         
-        // Delete confirmation dialog
         if (showDeleteDialog && providerToDelete != null) {
-            androidx.compose.material3.AlertDialog(
-                onDismissRequest = { 
+            LastChatDestructiveConfirmDialog(
+                title = stringResource(R.string.setting_tts_delete_title),
+                consequence = stringResource(R.string.setting_tts_delete_consequence),
+                onDismiss = {
                     showDeleteDialog = false
                     providerToDelete = null
                 },
-                title = { Text(stringResource(R.string.confirm_delete)) },
-                text = { Text(stringResource(R.string.setting_tts_delete_service)) },
-                dismissButton = {
-                    TextButton(onClick = { 
-                        showDeleteDialog = false
-                        providerToDelete = null
-                    }) {
-                        Text(stringResource(R.string.cancel))
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        providerToDelete?.let { p ->
-                            val removedVoiceIds = p.voices.map { it.id }.toSet()
-                            val newProviders = settings.ttsProviders - p
-                            val newSelectedId =
-                                if (settings.selectedTTSProviderId == p.id) {
-                                    newProviders.firstOrNull()?.id ?: DEFAULT_SYSTEM_TTS_ID
-                                } else {
-                                    settings.selectedTTSProviderId
-                                }
-                            val newSelectedVoiceId = if (settings.selectedTTSVoiceId in removedVoiceIds) {
-                                newProviders.find { it.id == newSelectedId }?.voices?.firstOrNull()?.id
-                                    ?: newProviders.firstOrNull()?.voices?.firstOrNull()?.id
-                                    ?: DEFAULT_SYSTEM_TTS_VOICE_ID
+                onConfirm = {
+                    providerToDelete?.let { p ->
+                        val removedVoiceIds = p.voices.map { it.id }.toSet()
+                        val newProviders = settings.ttsProviders - p
+                        val newSelectedId =
+                            if (settings.selectedTTSProviderId == p.id) {
+                                newProviders.firstOrNull()?.id ?: DEFAULT_SYSTEM_TTS_ID
                             } else {
-                                settings.selectedTTSVoiceId
+                                settings.selectedTTSProviderId
                             }
-                            vm.updateSettings(settings.copy(
-                                ttsProviders = newProviders,
-                                selectedTTSProviderId = newSelectedId,
-                                selectedTTSVoiceId = newSelectedVoiceId
-                            ))
+                        val newSelectedVoiceId = if (settings.selectedTTSVoiceId in removedVoiceIds) {
+                            newProviders.find { it.id == newSelectedId }?.voices?.firstOrNull()?.id
+                                ?: newProviders.firstOrNull()?.voices?.firstOrNull()?.id
+                                ?: DEFAULT_SYSTEM_TTS_VOICE_ID
+                        } else {
+                            settings.selectedTTSVoiceId
                         }
-                        showDeleteDialog = false
-                        providerToDelete = null
-                    }) {
-                        Text(stringResource(R.string.confirm))
+                        vm.updateSettings(settings.copy(
+                            ttsProviders = newProviders,
+                            selectedTTSProviderId = newSelectedId,
+                            selectedTTSVoiceId = newSelectedVoiceId
+                        ))
                     }
-                }
+                    showDeleteDialog = false
+                    providerToDelete = null
+                },
             )
         }
     }
@@ -568,6 +601,49 @@ internal fun TtsProvidersContent(
             verticalArrangement = Arrangement.spacedBy(4.dp),
             state = lazyListState
         ) {
+            if (settings.ttsProviders.isEmpty()) {
+                item(key = "empty") {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (LocalDarkMode.current) {
+                                MaterialTheme.colorScheme.surfaceContainerLow
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHighest
+                            }
+                        ),
+                        shape = AppShapes.CardLarge
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.VolumeUp,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(48.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                                Text(
+                                    text = stringResource(R.string.setting_tts_page_empty_title),
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = stringResource(R.string.setting_tts_page_empty_desc),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
             itemsIndexed(settings.ttsProviders, key = { _, provider -> provider.id }) { index, provider ->
                 val position = when {
                     settings.ttsProviders.size == 1 -> ItemPosition.ONLY
@@ -656,6 +732,7 @@ internal fun TtsProvidersContent(
                         }
                     }
                 }
+                }
             }
         }
 
@@ -676,53 +753,41 @@ internal fun TtsProvidersContent(
     }
 
     if (showDeleteDialog && providerToDelete != null) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = {
+        LastChatDestructiveConfirmDialog(
+            title = stringResource(R.string.setting_tts_delete_title),
+            consequence = stringResource(R.string.setting_tts_delete_consequence),
+            onDismiss = {
                 showDeleteDialog = false
                 providerToDelete = null
             },
-            title = { Text(stringResource(R.string.confirm_delete)) },
-            text = { Text(stringResource(R.string.setting_tts_delete_service)) },
-            dismissButton = {
-                TextButton(onClick = {
-                    showDeleteDialog = false
-                    providerToDelete = null
-                }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    providerToDelete?.let { provider ->
-                        val newProviders = settings.ttsProviders - provider
-                        val newSelectedId =
-                            if (settings.selectedTTSProviderId == provider.id) {
-                                newProviders.firstOrNull()?.id ?: DEFAULT_SYSTEM_TTS_ID
-                            } else {
-                                settings.selectedTTSProviderId
-                            }
-                        val removedVoiceIds = provider.voices.map { it.id }.toSet()
-                        val newSelectedVoiceId = if (settings.selectedTTSVoiceId in removedVoiceIds) {
-                            newProviders.find { it.id == newSelectedId }?.voices?.firstOrNull()?.id
-                                ?: newProviders.firstOrNull()?.voices?.firstOrNull()?.id
-                                ?: DEFAULT_SYSTEM_TTS_VOICE_ID
+            onConfirm = {
+                providerToDelete?.let { provider ->
+                    val newProviders = settings.ttsProviders - provider
+                    val newSelectedId =
+                        if (settings.selectedTTSProviderId == provider.id) {
+                            newProviders.firstOrNull()?.id ?: DEFAULT_SYSTEM_TTS_ID
                         } else {
-                            settings.selectedTTSVoiceId
+                            settings.selectedTTSProviderId
                         }
-                        vm.updateSettings(
-                            settings.copy(
-                                ttsProviders = newProviders,
-                                selectedTTSProviderId = newSelectedId,
-                                selectedTTSVoiceId = newSelectedVoiceId
-                            )
-                        )
+                    val removedVoiceIds = provider.voices.map { it.id }.toSet()
+                    val newSelectedVoiceId = if (settings.selectedTTSVoiceId in removedVoiceIds) {
+                        newProviders.find { it.id == newSelectedId }?.voices?.firstOrNull()?.id
+                            ?: newProviders.firstOrNull()?.voices?.firstOrNull()?.id
+                            ?: DEFAULT_SYSTEM_TTS_VOICE_ID
+                    } else {
+                        settings.selectedTTSVoiceId
                     }
-                    showDeleteDialog = false
-                    providerToDelete = null
-                }) {
-                    Text(stringResource(R.string.confirm))
+                    vm.updateSettings(
+                        settings.copy(
+                            ttsProviders = newProviders,
+                            selectedTTSProviderId = newSelectedId,
+                            selectedTTSVoiceId = newSelectedVoiceId
+                        )
+                    )
                 }
-            }
+                showDeleteDialog = false
+                providerToDelete = null
+            },
         )
     }
 
@@ -1230,33 +1295,41 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
                 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Surface(
+                Card(
                     onClick = {
                         haptics.perform(HapticPattern.Pop)
                         onAdd(TTSProviderSetting.OpenAI(name = "Custom TTS"))
                         showBottomSheet = false
                     },
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    ),
+                    shape = RoundedCornerShape(24.dp)
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier.size(40.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Rounded.Add, null, tint = MaterialTheme.colorScheme.onPrimary)
-                        }
-                        Column {
-                            Text(text = "Custom OpenAI-compatible TTS", style = MaterialTheme.typography.titleMedium)
-                            Text(text = "Add any TTS that supports the OpenAI /audio/speech protocol.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(
+                            imageVector = Icons.Rounded.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(40.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Custom OpenAI-compatible TTS",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
                         }
                     }
                 }
+                Spacer(modifier = Modifier.height(12.dp))
 
                 CompositionLocalProvider(
                     LocalOverscrollFactory provides null
@@ -1289,12 +1362,7 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
                                 else -> ItemPosition.MIDDLE
                             }
 
-                            val shape = when (position) {
-                                ItemPosition.FIRST -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 10.dp, bottomEnd = 10.dp)
-                                ItemPosition.LAST -> RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
-                                ItemPosition.MIDDLE -> RoundedCornerShape(10.dp)
-                                ItemPosition.ONLY -> RoundedCornerShape(24.dp)
-                            }
+                            val shape = position.listItemShape()
 
                             Surface(
                                 onClick = {
@@ -1305,7 +1373,7 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = shape,
-                                color = if (LocalDarkMode.current) Color.Black else MaterialTheme.colorScheme.surfaceContainerHigh
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -1322,28 +1390,24 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
                                             Icon(
                                                 imageVector = Icons.Rounded.PhoneAndroid,
                                                 contentDescription = null,
-                                                modifier = Modifier.size(24.dp)
+                                                modifier = Modifier.size(24.dp),
+                                                tint = MaterialTheme.colorScheme.onSurface,
                                             )
                                         }
                                     } else {
                                         AutoAIIconWithUrl(
                                             name = preset.name,
                                             customIconUri = preset.customIconUri,
-                                            modifier = Modifier.size(40.dp)
+                                            modifier = Modifier.size(40.dp),
+                                            contentColor = MaterialTheme.colorScheme.onSurface,
                                         )
                                     }
 
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = preset.name,
-                                            style = MaterialTheme.typography.titleMedium
-                                        )
-                                        Text(
-                                            text = preset.description,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
                                         )
                                     }
 

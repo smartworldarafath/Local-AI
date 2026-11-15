@@ -17,6 +17,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import me.rerere.ai.core.TokenUsage
 import me.rerere.ai.provider.BuiltInTools
+import me.rerere.ai.provider.ContextLimitSource
 import me.rerere.ai.provider.Model
 import me.rerere.ai.provider.ModelAbility
 import me.rerere.ai.provider.ModelType
@@ -35,7 +36,7 @@ import me.rerere.rikkahub.data.model.AssistantSearchMode
 import me.rerere.rikkahub.data.model.Avatar
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.model.Lorebook
-import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.ai.ui.MessageNode
 import me.rerere.rikkahub.data.model.withoutSkillSelectionOverride
 import me.rerere.rikkahub.data.model.QuickMessage
 import me.rerere.rikkahub.data.model.Skill
@@ -344,6 +345,7 @@ data class WebDisplaySettingDto(
     val showModelIcon: Boolean,
     val showModelName: Boolean,
     val showTokenUsage: Boolean,
+    val showContextTokenSummary: Boolean,
     val showThinkingContent: Boolean,
     val autoCloseThinking: Boolean,
     val codeBlockAutoWrap: Boolean,
@@ -453,6 +455,12 @@ data class WebProviderModelDto(
     val iconUrl: String? = null,
     val customIconUri: String? = null,
     val providerSlug: String? = null,
+    val contextWindowTokens: Int? = null,
+    val maxInputTokens: Int? = null,
+    val maxOutputTokens: Int? = null,
+    val customContextLimitTokens: Int? = null,
+    val contextLimitSource: ContextLimitSource? = null,
+    val maxImagesInContext: Int? = null,
 )
 
 @Serializable
@@ -801,6 +809,7 @@ private fun DisplaySetting.toWebDisplaySetting(context: Context): WebDisplaySett
         showModelIcon = showModelIcon,
         showModelName = showModelName,
         showTokenUsage = showTokenUsage,
+        showContextTokenSummary = showContextTokenSummary,
         showThinkingContent = true,
         autoCloseThinking = autoCloseThinking,
         codeBlockAutoWrap = codeBlockAutoWrap,
@@ -917,6 +926,7 @@ private fun me.rerere.rikkahub.data.ai.mcp.McpServerConfig.toWebMcpServerDto(): 
 
 private fun me.rerere.search.SearchServiceOptions.toWebSearchServiceDto(): WebSearchServiceDto {
     val type = when (this) {
+        is me.rerere.search.SearchServiceOptions.KeylessOptions -> "keyless"
         is me.rerere.search.SearchServiceOptions.BingLocalOptions -> "bing_local"
         is me.rerere.search.SearchServiceOptions.ZhipuOptions -> "zhipu"
         is me.rerere.search.SearchServiceOptions.TavilyOptions -> "tavily"
@@ -950,10 +960,13 @@ private fun ProviderSetting.toWebProviderDto(
             is ProviderSetting.Google -> "google"
             is ProviderSetting.Claude -> "claude"
             is ProviderSetting.ComfyUI -> "comfyui"
+            is ProviderSetting.LiteRtLocal -> "litert_local"
         },
         enabled = enabled,
         name = name,
-        models = models.map { model ->
+        // Backend visibility is a chat-model concern. Other model types are configured in their
+        // respective feature settings and must remain available to the web client.
+        models = models.filter { it.type != ModelType.CHAT || !it.backend }.map { model ->
             model.toWebProviderModelDto(
                 isSelected = model.id == selectedModelId,
                 builtInSearchEnabled = builtInSearchEnabled,
@@ -997,6 +1010,12 @@ private fun Model.toWebProviderModelDto(
         iconUrl = iconUrl,
         customIconUri = customIconUri,
         providerSlug = providerSlug,
+        contextWindowTokens = contextWindowTokens,
+        maxInputTokens = maxInputTokens,
+        maxOutputTokens = maxOutputTokens,
+        customContextLimitTokens = customContextLimitTokens,
+        contextLimitSource = contextLimitSource,
+        maxImagesInContext = maxImagesInContext,
     )
 }
 

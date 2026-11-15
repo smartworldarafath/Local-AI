@@ -18,13 +18,9 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,7 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,13 +82,13 @@ import me.rerere.rikkahub.Screen
 import me.rerere.rikkahub.data.model.Assistant
 import me.rerere.rikkahub.data.model.AssistantAffectScope
 import me.rerere.rikkahub.data.model.ChatAttachmentState
-import me.rerere.rikkahub.data.model.MessageNode
+import me.rerere.ai.ui.MessageNode
 import me.rerere.rikkahub.data.model.chatAttachmentDisplayName
 import me.rerere.rikkahub.data.model.chatAttachmentMimeHint
 import me.rerere.rikkahub.data.model.chatAttachmentState
 import me.rerere.rikkahub.data.model.replacePersonaPlaceholders
 import me.rerere.rikkahub.data.model.replaceRegexes
-import me.rerere.rikkahub.data.model.versionSelectionIndices
+import me.rerere.ai.ui.versionSelectionIndices
 import me.rerere.rikkahub.data.ai.tools.parseJsonElementWithRecovery
 import me.rerere.rikkahub.ui.components.message.ChatMessageActionButtons
 import me.rerere.rikkahub.ui.components.message.ChatMessageActionsSheet
@@ -100,7 +96,6 @@ import me.rerere.rikkahub.ui.components.message.ChatMessageCopySheet
 import me.rerere.rikkahub.ui.components.richtext.buildMarkdownPreviewHtml
 import me.rerere.rikkahub.ui.components.richtext.MarkdownBlock
 import me.rerere.rikkahub.ui.components.richtext.ZoomableAsyncImage
-import me.rerere.rikkahub.ui.components.ui.DocumentChip
 import me.rerere.rikkahub.ui.components.ui.UIAvatar
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.hooks.HapticPattern
@@ -122,6 +117,7 @@ import me.rerere.ai.core.MessageRole as AIMessageRole
  * Represents a group of consecutive messages from the same role.
  * For assistant messages, this groups all consecutive assistant nodes together.
  */
+@Immutable
 data class MessageTurnGroup(
     val nodes: List<MessageNode>,
     val role: MessageRole
@@ -224,7 +220,9 @@ data class MessageTurnGroup(
  * Group consecutive messages by role into MessageTurnGroups.
  * TOOL messages are treated as part of the ASSISTANT turn (they're tool results).
  */
-fun List<MessageNode>.groupIntoTurns(): List<MessageTurnGroup> {
+fun List<MessageNode>.groupIntoTurns(
+    previousGroups: List<MessageTurnGroup>? = null
+): List<MessageTurnGroup> {
     if (isEmpty()) return emptyList()
     
     val groups = mutableListOf<MessageTurnGroup>()
@@ -237,6 +235,24 @@ fun List<MessageNode>.groupIntoTurns(): List<MessageTurnGroup> {
         MessageRole.TOOL -> MessageRole.ASSISTANT
         else -> role
     }
+
+    fun finishCurrentGroup() {
+        if (currentGroup.isNotEmpty() && currentGroupRole != null) {
+            val role = currentGroupRole!!
+            val groupIdx = groups.size
+            val prev = previousGroups?.getOrNull(groupIdx)
+            if (prev != null &&
+                prev.role == role &&
+                prev.nodes.size == currentGroup.size &&
+                prev.nodes.indices.all { i -> prev.nodes[i] === currentGroup[i] }
+            ) {
+                groups.add(prev)
+            } else {
+                groups.add(MessageTurnGroup(currentGroup.toList(), role))
+            }
+            currentGroup = mutableListOf()
+        }
+    }
     
     forEach { node ->
         val nodeRole = node.currentMessage.role
@@ -244,16 +260,13 @@ fun List<MessageNode>.groupIntoTurns(): List<MessageTurnGroup> {
         
         // Start a new group if logical role changes
         if (currentGroup.isNotEmpty() && (logicalRole != currentGroupRole || node.forceTurnBreakBefore)) {
-            groups.add(MessageTurnGroup(currentGroup.toList(), currentGroupRole!!))
-            currentGroup = mutableListOf()
+            finishCurrentGroup()
         }
         currentGroup.add(node)
         currentGroupRole = logicalRole
     }
     
-    if (currentGroup.isNotEmpty() && currentGroupRole != null) {
-        groups.add(MessageTurnGroup(currentGroup.toList(), currentGroupRole!!))
-    }
+    finishCurrentGroup()
     
     return groups
 }
@@ -303,7 +316,10 @@ private fun JsonElement.lightSignature(depth: Int = 0): Int {
     }
 }
 
-private fun MessageTurnGroup.activityStateSignature(loading: Boolean): Long {
+internal fun MessageTurnGroup.activityStateSignature(
+    loading: Boolean,
+    includeReasoningText: Boolean = false,
+): Long {
     var hash = SIGNATURE_OFFSET
         .mix(role.hashCode())
         .mix(activeVersionTag.hashCode())
@@ -333,15 +349,23 @@ private fun MessageTurnGroup.activityStateSignature(loading: Boolean): Long {
             hash = when (part) {
                 is UIMessagePart.Text -> hash
                     .mix(1)
-                    .mix(part.text.length)
                     .mix(if (part.text.isBlank()) 1 else 0)
 
-                is UIMessagePart.Reasoning -> hash
-                    .mix(2)
-                    .mix(part.reasoning.length)
-                    .mix(part.createdAt.toEpochMilliseconds())
-                    .mix(part.finishedAt?.toEpochMilliseconds() ?: -1L)
-                    .mix(sampledStringHash(part.title))
+                is UIMessagePart.Reasoning -> {
+                    hash = hash
+                        .mix(2)
+                        .mix(part.createdAt.toEpochMilliseconds())
+                        .mix(part.finishedAt?.toEpochMilliseconds() ?: -1L)
+                        .mix(sampledStringHash(part.title))
+                    if (includeReasoningText) {
+                        hash = hash
+                            .mix(part.reasoning.length)
+                            .mix(sampledStringHash(part.reasoning))
+                    } else {
+                        hash = hash.mix(if (part.reasoning.isBlank()) 1 else 0)
+                    }
+                    hash
+                }
 
                 is UIMessagePart.ToolCall -> hash
                     .mix(3)
@@ -364,8 +388,8 @@ private fun MessageTurnGroup.activityStateSignature(loading: Boolean): Long {
     return hash
 }
 
-private fun MessageTurnGroup.timelineEntriesSignature(loading: Boolean): Long {
-    var hash = activityStateSignature(loading)
+internal fun MessageTurnGroup.timelineEntriesSignature(loading: Boolean): Long {
+    var hash = activityStateSignature(loading, includeReasoningText = true)
 
     filteredNodes.forEach { node ->
         node.currentMessage.parts.forEach { part ->
@@ -587,7 +611,6 @@ private fun AttachmentRow(
 
     val context = LocalContext.current
     val haptics = rememberPremiumHaptics()
-    val horizontalAlignment = if (alignEnd) Alignment.End else Alignment.Start
     val saturationMatrix = remember {
         android.graphics.ColorMatrix().apply { setSaturation(0f) }
     }
@@ -600,58 +623,9 @@ private fun AttachmentRow(
         }
     }
 
-    val listState = rememberLazyListState()
-    val canScrollLeft by remember {
-        derivedStateOf {
-            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0
-        }
-    }
-    val canScrollRight by remember {
-        derivedStateOf {
-            val layoutInfo = listState.layoutInfo
-            val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf false
-            lastVisibleItem.index < layoutInfo.totalItemsCount - 1 ||
-                lastVisibleItem.offset + lastVisibleItem.size > layoutInfo.viewportEndOffset
-        }
-    }
-    val leftFadeAlpha by animateFloatAsState(
-        targetValue = if (canScrollLeft) 1f else 0f,
-        animationSpec = tween(180),
-        label = "attachment_left_fade"
-    )
-    val rightFadeAlpha by animateFloatAsState(
-        targetValue = if (canScrollRight) 1f else 0f,
-        animationSpec = tween(180),
-        label = "attachment_right_fade"
-    )
-
-    LazyRow(
-        state = listState,
-        horizontalArrangement = Arrangement.spacedBy(8.dp, horizontalAlignment),
-        modifier = modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                compositingStrategy = CompositingStrategy.Offscreen
-            }
-            .drawWithContent {
-                drawContent()
-                if ((leftFadeAlpha > 0f || rightFadeAlpha > 0f) && size.width > 0f) {
-                    val fadeWidthPx = 32.dp.toPx()
-                    val leftEnd = (fadeWidthPx / size.width).coerceAtMost(0.35f)
-                    val rightStart = (1f - fadeWidthPx / size.width).coerceAtLeast(0.65f)
-                    drawRect(
-                        brush = Brush.horizontalGradient(
-                            colorStops = arrayOf(
-                                0f to Color.Black.copy(alpha = 1f - leftFadeAlpha),
-                                leftEnd to Color.Black,
-                                rightStart to Color.Black,
-                                1f to Color.Black.copy(alpha = 1f - rightFadeAlpha),
-                            )
-                        ),
-                        blendMode = BlendMode.DstIn
-                    )
-                }
-            }
+    LastChatMessageAttachmentRow(
+        alignEnd = alignEnd,
+        modifier = modifier,
     ) {
         items(
             items = attachments,
@@ -685,13 +659,12 @@ private fun AttachmentRow(
                 }
 
                 is RenderableAttachment.File -> {
-                    DocumentChip(
+                    LastChatDocumentAttachmentTile(
                         fileName = if (attachment.archived && attachment.url.isBlank()) {
                             "${attachment.fileName} (archived)"
                         } else {
                             attachment.fileName
                         },
-                        mimeType = attachment.mimeType,
                         modifier = Modifier
                             .size(72.dp)
                             .graphicsLayer(alpha = if (attachment.archived) 0.72f else 1f),
@@ -708,9 +681,8 @@ private fun AttachmentRow(
                 }
 
                 is RenderableAttachment.Placeholder -> {
-                    DocumentChip(
+                    LastChatDocumentAttachmentTile(
                         fileName = attachment.fileName,
-                        mimeType = attachment.mimeType,
                         modifier = Modifier
                             .size(72.dp)
                             .graphicsLayer(alpha = 0.72f),
@@ -762,6 +734,8 @@ internal fun buildTimelineEntries(
             is UIMessagePart.Reasoning -> {
                 val durationMs = if (part.finishedAt != null) {
                     (part.finishedAt!! - part.createdAt).inWholeMilliseconds
+                } else if (!loading) {
+                    (kotlin.time.Clock.System.now() - part.createdAt).inWholeMilliseconds.coerceAtLeast(0L)
                 } else 0L
                 
                 entries.add(TimelineEntry.Reasoning(
@@ -769,7 +743,7 @@ internal fun buildTimelineEntries(
                     content = part.reasoning,
                     durationMs = durationMs,
                     title = part.title,
-                    isInProgress = part.finishedAt == null
+                    isInProgress = loading && part.finishedAt == null
                 ))
             }
             is UIMessagePart.ToolCall -> {
@@ -885,6 +859,7 @@ private fun getToolDisplayName(toolName: String): String {
         "workspace_write_file" -> "Writing workspace file"
         "workspace_edit_file" -> "Editing workspace file"
         "workspace_shell" -> "Running workspace command"
+        "workspace_view_image" -> "Viewing workspace image"
         "create_memory" -> "Creating memory"
         "edit_memory" -> "Editing memory"
         "delete_memory" -> "Deleting memory"
@@ -928,7 +903,7 @@ internal fun deriveActivityState(
             .map { categorizeToolName(resolveActivityToolName(it.toolName, it.arguments)) }
             .distinct()
         
-        val hasReasoning = totalReasoningMs > 0
+        val hasReasoning = totalReasoningMs > 0 || reasoningParts.isNotEmpty()
         val hasTools = toolCategories.isNotEmpty()
         val hasOcr = ocrAnnotations.isNotEmpty()
         
@@ -1063,7 +1038,11 @@ fun ChatMessageTurn(
     // remember keys; using MessageTurnGroup or MessageNode keys can structurally
     // compare large JsonElement tool payloads on the UI thread.
     val isTimelineLive = loading && isLastTurn
-    val activitySignature = group.activityStateSignature(isTimelineLive)
+    val includeReasoningText = timelineOpen || effectiveDisplay.reasoningPreviewEnabled
+    val activitySignature = group.activityStateSignature(
+        loading = isTimelineLive,
+        includeReasoningText = includeReasoningText
+    )
     val activityState = remember(activitySignature) {
         deriveActivityState(
             parts = group.allParts,
@@ -1152,7 +1131,9 @@ fun ChatMessageTurn(
                     },
                     onTimelineDismiss = { timelineOpen = false },
                     onBubbleClick = {
-                        if (isLastTurn) {
+                        if (timelineOpen) {
+                            timelineOpen = false
+                        } else if (isLastTurn) {
                             showActionsSheet = true
                         } else {
                             actionsExpanded = !actionsExpanded
@@ -1273,18 +1254,22 @@ private fun UserMessageTurn(
                         onToggleToolbar()
                     }
                 ) {
-                    MarkdownBlock(
-                        workspaceId = assistant?.workspaceId?.toString(),
-                        content = part.text
+                    val userNickname = settings.displaySetting.userNickname
+                    val displayContent = remember(part.text, assistant, userNickname) {
+                        part.text
                             .replacePersonaPlaceholders(
                                 assistant = assistant,
-                                userNickname = settings.displaySetting.userNickname,
+                                userNickname = userNickname,
                             )
                             .replaceRegexes(
                                 assistant = assistant,
                                 scope = AssistantAffectScope.USER,
                                 visual = true,
-                            ),
+                            )
+                    }
+                    MarkdownBlock(
+                        workspaceId = assistant?.workspaceId?.toString(),
+                        content = displayContent,
                         paragraphSpacing = 12.dp,
                         onClickCitation = {}
                     )
@@ -1400,6 +1385,7 @@ private fun AssistantMessageTurn(
     ttsProviderOverride: me.rerere.tts.provider.TTSProviderSetting?,
     modifier: Modifier = Modifier
 ) {
+    val isTimelineLive = loading && isLastTurn
     val settings = LocalSettings.current
     val context = LocalContext.current
     val defaultAssistantName = stringResource(R.string.assistant_page_default_assistant)
@@ -1464,6 +1450,17 @@ private fun AssistantMessageTurn(
                 } else {
                     Modifier
                 }
+            )
+            .then(
+                if (timelineOpen) {
+                    Modifier.combinedClickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onTimelineDismiss
+                    )
+                } else {
+                    Modifier
+                }
             ),
         verticalArrangement = Arrangement.spacedBy(
             if (showAssistantBubbles) elementSpacing else 3.dp
@@ -1515,6 +1512,7 @@ private fun AssistantMessageTurn(
                         timelineEntries = timelineEntries,
                         initialTimelineOpenRequest = initialTimelineOpenRequest,
                         assistantId = assistant?.id?.toString(),
+                        timelineLive = isTimelineLive,
                         onTimelineDismiss = {
                             haptics.perform(HapticPattern.Pop)
                             onTimelineDismiss()
@@ -1572,18 +1570,22 @@ private fun AssistantMessageTurn(
                     modifier = Modifier.widthIn(max = maxWidth),
                     onClick = handleBubbleClick
                 ) {
-                    MarkdownBlock(
-                        workspaceId = assistant?.workspaceId?.toString(),
-                        content = part.text.trimStart()
+                    val userNickname = settings.displaySetting.userNickname
+                    val displayContent = remember(part.text, assistant, userNickname) {
+                        part.text.trimStart()
                             .replacePersonaPlaceholders(
                                 assistant = assistant,
-                                userNickname = settings.displaySetting.userNickname,
+                                userNickname = userNickname,
                             )
                             .replaceRegexes(
                                 assistant = assistant,
                                 scope = AssistantAffectScope.ASSISTANT,
                                 visual = true,
-                            ),
+                            )
+                    }
+                    MarkdownBlock(
+                        workspaceId = assistant?.workspaceId?.toString(),
+                        content = displayContent,
                         paragraphSpacing = 12.dp,
                         streamingTextReveal = loading && index == allTextBubbles.lastIndex,
                         onExpandedStreamingCodeBlockChanged = onExpandedStreamingCodeBlockChanged,
@@ -1636,6 +1638,7 @@ private fun AssistantMessageTurn(
                     timelineEntries = timelineEntries,
                     initialTimelineOpenRequest = initialTimelineOpenRequest,
                     assistantId = assistant?.id?.toString(),
+                    timelineLive = isTimelineLive,
                     onTimelineDismiss = {
                         haptics.perform(HapticPattern.Pop)
                         onTimelineDismiss()
@@ -1650,18 +1653,22 @@ private fun AssistantMessageTurn(
             )
 
             allTextBubbles.forEachIndexed { index, (_, part) ->
-                MarkdownBlock(
-                    workspaceId = assistant?.workspaceId?.toString(),
-                    content = part.text.trimStart()
+                val userNickname = settings.displaySetting.userNickname
+                val displayContent = remember(part.text, assistant, userNickname) {
+                    part.text.trimStart()
                         .replacePersonaPlaceholders(
                             assistant = assistant,
-                            userNickname = settings.displaySetting.userNickname,
+                            userNickname = userNickname,
                         )
                         .replaceRegexes(
                             assistant = assistant,
                             scope = AssistantAffectScope.ASSISTANT,
                             visual = true,
-                        ),
+                        )
+                }
+                MarkdownBlock(
+                    workspaceId = assistant?.workspaceId?.toString(),
+                    content = displayContent,
                     paragraphSpacing = 12.dp,
                     streamingTextReveal = loading && index == allTextBubbles.lastIndex,
                     onExpandedStreamingCodeBlockChanged = onExpandedStreamingCodeBlockChanged,

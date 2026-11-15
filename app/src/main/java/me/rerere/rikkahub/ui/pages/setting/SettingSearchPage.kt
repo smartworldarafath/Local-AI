@@ -92,21 +92,23 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.data.ai.models.ModelCatalogSnapshot
-import me.rerere.rikkahub.data.ai.models.searchProviderIconUri
 import me.rerere.rikkahub.data.datastore.Settings
 import me.rerere.rikkahub.ui.components.nav.BackButton
 import me.rerere.rikkahub.ui.components.nav.OneUITopAppBar
-import me.rerere.rikkahub.ui.components.ui.AutoAIIconWithUrl
 import me.rerere.rikkahub.ui.components.ui.FormItem
 import me.rerere.rikkahub.ui.components.ui.ItemPosition
+import me.rerere.rikkahub.ui.components.ui.listItemShape
+import me.rerere.rikkahub.ui.components.ui.LastChatDestructiveConfirmDialog
 import me.rerere.rikkahub.ui.components.ui.OutlinedNumberInput
 import me.rerere.rikkahub.ui.components.ui.PhysicsSwipeToDelete
+import me.rerere.rikkahub.ui.components.ui.SearchProviderIcon
 import me.rerere.rikkahub.ui.components.ui.Tag
 import me.rerere.rikkahub.ui.components.ui.TagType
 import me.rerere.rikkahub.ui.hooks.HapticPattern
 import me.rerere.rikkahub.ui.hooks.rememberPremiumHaptics
 import me.rerere.rikkahub.ui.theme.AppShapes
 import me.rerere.rikkahub.utils.plus
+import me.rerere.search.KeylessSearchService
 import me.rerere.search.SearchCommonOptions
 import me.rerere.search.SearchService
 import me.rerere.search.SearchServiceOptions
@@ -131,10 +133,10 @@ data class SearchServicePreset(
  */
 val SEARCH_SERVICE_PRESETS = listOf(
     SearchServicePreset(
-        name = "Bing",
-        descriptionRes = R.string.setting_search_preset_bing_desc,
-        createOptions = { SearchServiceOptions.BingLocalOptions() },
-        hasScraping = false
+        name = "Keyless",
+        descriptionRes = R.string.setting_search_preset_keyless_desc,
+        createOptions = { SearchServiceOptions.KeylessOptions() },
+        hasScraping = true
     ),
     SearchServicePreset(
         name = "Perplexity",
@@ -223,6 +225,52 @@ val SEARCH_SERVICE_PRESETS = listOf(
 )
 
 @Composable
+private fun KeylessOptionsDescription() {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = stringResource(R.string.setting_search_keyless_explainer),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = stringResource(R.string.setting_search_keyless_backends_label),
+            style = MaterialTheme.typography.labelLarge,
+        )
+        KeylessSearchService.backends.forEach { backend ->
+            Surface(
+                shape = AppShapes.ListItem,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = backend.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = backend.role,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    backend.status?.takeIf { it.isNotBlank() }?.let { status ->
+                        Text(
+                            text = status,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun SearchServiceDescription(service: SearchServiceOptions) {
     val uriHandler = LocalUriHandler.current
 
@@ -234,6 +282,7 @@ private fun SearchServiceDescription(service: SearchServiceOptions) {
     }
 
     when (service) {
+        is SearchServiceOptions.KeylessOptions -> {}
         is SearchServiceOptions.BingLocalOptions -> Text(stringResource(SearchR.string.bing_desc))
         is SearchServiceOptions.SearXNGOptions -> {
             Text(stringResource(SearchR.string.searxng_desc_1))
@@ -364,6 +413,49 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 state = lazyListState
             ) {
+                if (settings.searchServices.isEmpty()) {
+                    item(key = "empty") {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (LocalDarkMode.current) {
+                                    MaterialTheme.colorScheme.surfaceContainerLow
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainerHighest
+                                }
+                            ),
+                            shape = AppShapes.CardLarge
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Search,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(48.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.setting_search_empty_title),
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.setting_search_empty_desc),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
                 itemsIndexed(settings.searchServices, key = { _, service -> service.id }) { index, service ->
                 val position = when {
                     settings.searchServices.size == 1 -> ItemPosition.ONLY
@@ -451,6 +543,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                     }
                 }
                 }
+                }
             }
 
             Box(
@@ -469,39 +562,26 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
             )
         }
         
-        // Delete confirmation dialog
         if (showDeleteDialog && serviceToDelete != null) {
-            AlertDialog(
-                onDismissRequest = { 
+            LastChatDestructiveConfirmDialog(
+                title = stringResource(R.string.setting_search_delete_title),
+                consequence = stringResource(R.string.setting_search_delete_consequence),
+                onDismiss = {
                     showDeleteDialog = false
                     serviceToDelete = null
                 },
-                title = { Text(stringResource(R.string.confirm_delete)) },
-                text = { Text(stringResource(R.string.setting_search_delete_service)) },
-                dismissButton = {
-                    TextButton(onClick = { 
-                        showDeleteDialog = false
-                        serviceToDelete = null
-                    }) {
-                        Text(stringResource(R.string.cancel))
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        serviceToDelete?.let { svc ->
-                            val idx = settings.searchServices.indexOfFirst { it.id == svc.id }
-                            if (idx >= 0) {
-                                val newServices = settings.searchServices.toMutableList()
-                                newServices.removeAt(idx)
-                                vm.updateSettings(settings.copy(searchServices = newServices))
-                            }
+                onConfirm = {
+                    serviceToDelete?.let { svc ->
+                        val idx = settings.searchServices.indexOfFirst { it.id == svc.id }
+                        if (idx >= 0) {
+                            val newServices = settings.searchServices.toMutableList()
+                            newServices.removeAt(idx)
+                            vm.updateSettings(settings.copy(searchServices = newServices))
                         }
-                        showDeleteDialog = false
-                        serviceToDelete = null
-                    }) {
-                        Text(stringResource(R.string.confirm))
                     }
-                }
+                    showDeleteDialog = false
+                    serviceToDelete = null
+                },
             )
         }
     }
@@ -522,7 +602,6 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
     
     // Edit Search Service Bottom Sheet
     editingService?.let { service ->
-        val context = LocalContext.current
         val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         val scope = androidx.compose.runtime.rememberCoroutineScope()
         var currentService by remember(service) { mutableStateOf(service) }
@@ -554,14 +633,9 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
                     .fillMaxHeight(0.8f),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Header
-                Text(
-                    text = stringResource(
-                        R.string.setting_search_edit_service,
-                        SearchServiceOptions.TYPES[service::class]
-                            ?: context.getString(R.string.setting_search_service_generic)
-                    ),
-                    style = MaterialTheme.typography.headlineSmall
+                SearchServiceEditHeader(
+                    service = currentService,
+                    catalogSnapshot = catalogSnapshot,
                 )
                 
                 // Configuration options based on service type
@@ -623,6 +697,9 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
                                     currentService = it
                                 }
                             }
+                            is SearchServiceOptions.KeylessOptions -> {
+                                KeylessOptionsDescription()
+                            }
                             is SearchServiceOptions.BingLocalOptions -> {
                                 // No configuration needed for Bing
                                 Text(
@@ -653,11 +730,11 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
                             }
                         }
                         
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        // Service description
-                        ProvideTextStyle(MaterialTheme.typography.labelMedium) {
-                            SearchServiceDescription(currentService)
+                        if (currentService !is SearchServiceOptions.KeylessOptions) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            ProvideTextStyle(MaterialTheme.typography.labelMedium) {
+                                SearchServiceDescription(currentService)
+                            }
                         }
                     }
                 }
@@ -734,6 +811,49 @@ internal fun SearchProvidersContent(
             verticalArrangement = Arrangement.spacedBy(4.dp),
             state = lazyListState
         ) {
+            if (settings.searchServices.isEmpty()) {
+                item(key = "empty") {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (LocalDarkMode.current) {
+                                MaterialTheme.colorScheme.surfaceContainerLow
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHighest
+                            }
+                        ),
+                        shape = AppShapes.CardLarge
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Search,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(48.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                                Text(
+                                    text = stringResource(R.string.setting_search_empty_title),
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = stringResource(R.string.setting_search_empty_desc),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
             itemsIndexed(settings.searchServices, key = { _, service -> service.id }) { index, service ->
                 val position = when {
                     settings.searchServices.size == 1 -> ItemPosition.ONLY
@@ -816,6 +936,7 @@ internal fun SearchProvidersContent(
                     }
                 }
             }
+            }
         }
 
         Box(
@@ -835,43 +956,32 @@ internal fun SearchProvidersContent(
     }
 
     if (showDeleteDialog && serviceToDelete != null) {
-        AlertDialog(
-            onDismissRequest = {
+        LastChatDestructiveConfirmDialog(
+            title = stringResource(R.string.setting_search_delete_title),
+            consequence = stringResource(R.string.setting_search_delete_consequence),
+            onDismiss = {
                 showDeleteDialog = false
                 serviceToDelete = null
             },
-            title = { Text(stringResource(R.string.confirm_delete)) },
-            text = { Text(stringResource(R.string.setting_search_delete_service)) },
-            dismissButton = {
-                TextButton(onClick = {
-                    showDeleteDialog = false
-                    serviceToDelete = null
-                }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    serviceToDelete?.let { svc ->
-                        val idx = settings.searchServices.indexOfFirst { it.id == svc.id }
-                        if (idx >= 0) {
-                            val newServices = settings.searchServices.toMutableList()
-                            newServices.removeAt(idx)
-                            vm.updateSettings(settings.copy(searchServices = newServices))
-                        }
+            onConfirm = {
+                serviceToDelete?.let { svc ->
+                    val idx = settings.searchServices.indexOfFirst { it.id == svc.id }
+                    if (idx >= 0) {
+                        val newServices = settings.searchServices.toMutableList()
+                        newServices.removeAt(idx)
+                        vm.updateSettings(settings.copy(searchServices = newServices))
                     }
-                    showDeleteDialog = false
-                    serviceToDelete = null
-                }) {
-                    Text(stringResource(R.string.confirm))
                 }
-            }
+                showDeleteDialog = false
+                serviceToDelete = null
+            },
         )
     }
 
     SearchServiceEditorSheet(
         service = editingService,
         settings = settings,
+        catalogSnapshot = catalogSnapshot,
         onDismiss = { editingService = null },
         onSave = { original, updated ->
             val newServices = settings.searchServices.map {
@@ -887,11 +997,11 @@ internal fun SearchProvidersContent(
 private fun SearchServiceEditorSheet(
     service: SearchServiceOptions?,
     settings: Settings,
+    catalogSnapshot: ModelCatalogSnapshot?,
     onDismiss: () -> Unit,
     onSave: (SearchServiceOptions, SearchServiceOptions) -> Unit
 ) {
     service ?: return
-    val context = LocalContext.current
     val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var currentService by remember(service) { mutableStateOf(service) }
@@ -921,13 +1031,9 @@ private fun SearchServiceEditorSheet(
                 .fillMaxHeight(0.8f),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(
-                text = stringResource(
-                    R.string.setting_search_edit_service,
-                    SearchServiceOptions.TYPES[service::class]
-                        ?: context.getString(R.string.setting_search_service_generic)
-                ),
-                style = MaterialTheme.typography.headlineSmall
+            SearchServiceEditHeader(
+                service = currentService,
+                catalogSnapshot = catalogSnapshot,
             )
 
             LazyColumn(
@@ -948,6 +1054,7 @@ private fun SearchServiceEditorSheet(
                         is SearchServiceOptions.OllamaOptions -> OllamaOptions(currentService as SearchServiceOptions.OllamaOptions) { currentService = it }
                         is SearchServiceOptions.PerplexityOptions -> PerplexityOptions(currentService as SearchServiceOptions.PerplexityOptions) { currentService = it }
                         is SearchServiceOptions.GrokOptions -> GrokOptions(currentService as SearchServiceOptions.GrokOptions) { currentService = it }
+                        is SearchServiceOptions.KeylessOptions -> KeylessOptionsDescription()
                         is SearchServiceOptions.BingLocalOptions -> Text(
                             text = stringResource(R.string.setting_search_bing_no_config),
                             style = MaterialTheme.typography.bodyMedium,
@@ -959,9 +1066,11 @@ private fun SearchServiceEditorSheet(
                         is SearchServiceOptions.NanoGPTOptions -> NanoGPTOptions(currentService as SearchServiceOptions.NanoGPTOptions) { currentService = it }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-                    ProvideTextStyle(MaterialTheme.typography.labelMedium) {
-                        SearchServiceDescription(currentService)
+                    if (currentService !is SearchServiceOptions.KeylessOptions) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        ProvideTextStyle(MaterialTheme.typography.labelMedium) {
+                            SearchServiceDescription(currentService)
+                        }
                     }
                 }
             }
@@ -1126,12 +1235,7 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
                                 else -> ItemPosition.MIDDLE
                             }
                             
-                            val shape = when (position) {
-                                ItemPosition.FIRST -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 10.dp, bottomEnd = 10.dp)
-                                ItemPosition.LAST -> RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
-                                ItemPosition.MIDDLE -> RoundedCornerShape(10.dp)
-                                ItemPosition.ONLY -> RoundedCornerShape(24.dp)
-                            }
+                            val shape = position.listItemShape()
                             
                             Surface(
                                 onClick = {
@@ -1142,7 +1246,7 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = shape,
-                                color = if (LocalDarkMode.current) Color.Black else MaterialTheme.colorScheme.surfaceContainerHigh
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -1151,15 +1255,17 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
                                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    AutoAIIconWithUrl(
+                                    SearchProviderIcon(
                                         name = preset.name,
-                                        customIconUri = catalogSnapshot?.searchProviderIconUri(preset.name),
-                                        modifier = Modifier.size(40.dp)
+                                        catalogSnapshot = catalogSnapshot,
+                                        modifier = Modifier.size(40.dp),
+                                        contentColor = MaterialTheme.colorScheme.onSurface,
                                     )
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = preset.name,
-                                            style = MaterialTheme.typography.titleMedium
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
                                         )
                                         Text(
                                             text = context.getString(preset.descriptionRes),
@@ -1195,6 +1301,36 @@ containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceCon
 
 
 @Composable
+private fun SearchServiceEditHeader(
+    service: SearchServiceOptions,
+    catalogSnapshot: ModelCatalogSnapshot?,
+) {
+    val context = LocalContext.current
+    val serviceName = SearchServiceOptions.TYPES[service::class]
+        ?: context.getString(R.string.setting_search_service_generic)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SearchProviderIcon(
+            name = serviceName,
+            service = service,
+            catalogSnapshot = catalogSnapshot,
+            modifier = Modifier.size(32.dp),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = if (service is SearchServiceOptions.KeylessOptions) {
+                stringResource(R.string.setting_search_what_is_keyless)
+            } else {
+                stringResource(R.string.setting_search_edit_service, serviceName)
+            },
+            style = MaterialTheme.typography.headlineSmall,
+        )
+    }
+}
+
+@Composable
 private fun SearchServiceItemContent(
     service: SearchServiceOptions,
     catalogSnapshot: ModelCatalogSnapshot?,
@@ -1218,9 +1354,10 @@ private fun SearchServiceItemContent(
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AutoAIIconWithUrl(
+        SearchProviderIcon(
             name = serviceName,
-            customIconUri = catalogSnapshot?.searchProviderIconUri(serviceName),
+            service = service,
+            catalogSnapshot = catalogSnapshot,
             modifier = Modifier.size(40.dp)
         )
         

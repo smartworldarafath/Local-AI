@@ -1,9 +1,6 @@
 package me.rerere.rikkahub.web
 
 import android.content.Context
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.workDataOf
 import androidx.core.net.toUri
 import io.ktor.http.ContentDisposition
 import io.ktor.http.ContentType
@@ -70,7 +67,6 @@ import me.rerere.rikkahub.data.model.AssistantSearchMode
 import me.rerere.rikkahub.data.model.Conversation
 import me.rerere.rikkahub.data.repository.ConversationRepository
 import me.rerere.rikkahub.service.ChatService
-import me.rerere.rikkahub.service.MemoryConsolidationWorker
 import me.rerere.rikkahub.utils.JsonInstant
 
 private const val MAX_UPLOAD_FILE_SIZE_BYTES = 20 * 1024 * 1024
@@ -438,26 +434,6 @@ private fun Route.webRoutes(
             call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
         }
 
-        post("/{id}/consolidate") {
-            val conversationId = call.parameters["id"].toUuid("conversation id")
-            withContext(Dispatchers.IO) {
-                conversationRepo.getConversationById(conversationId)
-            } ?: throw NotFoundException("Conversation not found")
-
-            withContext(Dispatchers.IO) {
-                conversationRepo.markAsNotConsolidated(conversationId)
-            }
-            val request = OneTimeWorkRequestBuilder<MemoryConsolidationWorker>()
-                .setInputData(
-                    workDataOf(
-                        "FORCE_CONVERSATION_ID" to conversationId.toString()
-                    )
-                )
-                .build()
-            WorkManager.getInstance(context).enqueue(request)
-            call.respond(HttpStatusCode.Accepted, mapOf("status" to "accepted"))
-        }
-
         post("/{id}/context-refresh") {
             val conversationId = call.parameters["id"].toUuid("conversation id")
             val result = chatService.summarizeAndRefresh(conversationId)
@@ -571,6 +547,10 @@ private fun Route.webRoutes(
             val messageId = request.messageId.toUuid("message id")
 
             val fork = chatService.forkConversationAtMessage(conversationId, messageId)
+            if (fork == null) {
+                call.respond(HttpStatusCode.NotFound, mapOf("error" to "fork_failed"))
+                return@post
+            }
             call.respond(
                 HttpStatusCode.Created,
                 ForkConversationResponse(conversationId = fork.id.toString()),
@@ -1394,7 +1374,7 @@ internal fun resolveAiIconAssetPath(
         "deepseek" in lowerName -> "deepseek.svg"
         "elevenlabs" in lowerName || "eleven labs" in lowerName -> "elevenlabs.svg"
         "exa" in lowerName -> "exa.svg"
-        "firecrawl" in lowerName -> "firecrawl.svg"
+        "firecrawl" in lowerName && "keyless" !in lowerName -> "firecrawl.svg"
         "fireworks" in lowerName -> "fireworks.svg"
         "gemini" in lowerName || "google" in lowerName -> "gemini.svg"
         "github" in lowerName -> "github.svg"
@@ -1416,9 +1396,12 @@ internal fun resolveAiIconAssetPath(
         "searxng" in lowerName || "searx" in lowerName -> "searxng.svg"
         "tavily" in lowerName -> "tavily.svg"
         "zhipu" in lowerName || "glm" in lowerName -> "zhipu.svg"
+        "keyless" in lowerName -> null
         else -> null
     }
     if (explicitMatch != null) return explicitMatch
+
+    if ("keyless" in lowerName) return null
 
     // Generic fallback: try first word of the name as an SVG filename.
     // This handles providers like "NVIDIA NIM" → "nvidia.svg", "Regolo AI" → "regolo.svg"
@@ -1497,7 +1480,7 @@ internal fun getProviderSlugFromName(name: String): String? {
         lowerName.contains("brave") -> "brave"
         lowerName.contains("elevenlabs") || lowerName.contains("eleven labs") -> "elevenlabs"
         lowerName.contains("exa") -> "exa"
-        lowerName.contains("firecrawl") -> "firecrawl"
+        lowerName.contains("firecrawl") && !lowerName.contains("keyless") -> "firecrawl"
         lowerName.contains("github") -> "github"
         lowerName.contains("huggingface") || lowerName.contains("hugging face") -> "huggingface"
         lowerName.contains("jina") -> "jina"

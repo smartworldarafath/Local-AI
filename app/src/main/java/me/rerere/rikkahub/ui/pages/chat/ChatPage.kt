@@ -2,15 +2,27 @@ package me.rerere.rikkahub.ui.pages.chat
 
 import me.rerere.rikkahub.ui.context.LocalChatAnimationsEnabled
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.tween
 import androidx.activity.compose.BackHandler
 import androidx.core.net.toUri
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -25,6 +37,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
@@ -37,8 +50,10 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.AlertDialog
@@ -75,9 +90,13 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -96,7 +115,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SelectAll
@@ -106,6 +125,7 @@ import androidx.compose.material.icons.rounded.HistoryToggleOff
 
 import me.rerere.rikkahub.data.datastore.getEffectiveDisplaySetting
 import me.rerere.rikkahub.ui.components.chat.NewChatContent
+import me.rerere.rikkahub.ui.components.nav.LastChatMenuButton
 
 import me.rerere.rikkahub.ui.components.ui.UpdateDialog
 import me.rerere.rikkahub.ui.components.ui.ToastType
@@ -115,9 +135,23 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import me.rerere.ai.core.MessageRole
+import me.rerere.ai.context.ContextCountConfidence
+import me.rerere.ai.context.ContextTokenEstimator
+import me.rerere.ai.context.ContextUsageBreakdown
+import me.rerere.ai.context.calculateMinSafeFloorTokens
+import me.rerere.ai.context.effectiveHistoryForContext
+import me.rerere.ai.context.probableTemporaryTokenReserve
+import me.rerere.ai.context.smartFitContext
+import me.rerere.ai.context.smartInputBudget
 import me.rerere.ai.provider.Model
+import me.rerere.ai.provider.ModelAbility
+import me.rerere.ai.provider.baseCapacityTokens
+import me.rerere.ai.provider.contextCapacityTokens
 import me.rerere.ai.ui.UIMessage
 import me.rerere.ai.ui.UIMessagePart
+import kotlin.math.roundToInt
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.layout.onGloballyPositioned
 import me.rerere.rikkahub.BuildConfig
 import me.rerere.rikkahub.R
 import me.rerere.rikkahub.Screen
@@ -126,8 +160,18 @@ import me.rerere.rikkahub.data.datastore.TtsAutoplayMode
 import me.rerere.rikkahub.data.datastore.findProvider
 import me.rerere.rikkahub.data.datastore.getEffectiveTTSProvider
 import me.rerere.rikkahub.data.datastore.getEffectiveTtsAutoplayMode
+import me.rerere.rikkahub.data.ai.contextUsageSourceKey
+import me.rerere.rikkahub.data.ai.buildTimeAwarenessBlock
+import me.rerere.rikkahub.data.ai.resolveActiveSkillIds
+import me.rerere.rikkahub.data.ai.tools.toDefinitionPreviews
+import me.rerere.rikkahub.data.ai.selectSmartMemoryContext
+import me.rerere.rikkahub.data.ai.prompts.DEFAULT_LEARNING_MODE_PROMPT
 import me.rerere.rikkahub.data.model.Assistant
+import me.rerere.rikkahub.data.model.AssistantMemory
 import me.rerere.rikkahub.data.model.Conversation
+import me.rerere.rikkahub.data.model.LorebookActivationType
+import me.rerere.rikkahub.data.model.ModeAttachmentType
+import me.rerere.rikkahub.navigation.CHAT_ROUTE_TARGET_KEY
 import me.rerere.rikkahub.navigation.ChatRouteTarget
 import me.rerere.rikkahub.data.repository.ChatAttachmentManager
 import me.rerere.rikkahub.ui.components.ai.MinimalChatInput
@@ -141,11 +185,13 @@ import me.rerere.rikkahub.ui.hooks.rememberChatInputState
 import me.rerere.rikkahub.ui.hooks.rememberPremiumHaptics
 import me.rerere.rikkahub.ui.hooks.useEditState
 import me.rerere.rikkahub.service.ChatPersistenceMode
+import me.rerere.rikkahub.service.ContextManagementActivity
 import me.rerere.rikkahub.ui.theme.AssistantChatTheme
 import me.rerere.rikkahub.utils.base64Decode
 import me.rerere.rikkahub.utils.getFileNameFromUri
 import me.rerere.rikkahub.utils.getFileMimeType
 import me.rerere.rikkahub.utils.navigateToChatPage
+import me.rerere.rikkahub.utils.toLocalInferenceUserMessage
 import kotlinx.coroutines.Dispatchers
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
@@ -157,7 +203,12 @@ import me.rerere.rikkahub.ui.modifier.LastChatBlur
 import me.rerere.rikkahub.ui.modifier.LocalLastChatBlur
 import me.rerere.rikkahub.ui.modifier.lastChatBlurEffect
 import me.rerere.rikkahub.ui.modifier.lastChatBlurSource
+import me.rerere.rikkahub.ui.modifier.lastChatSoftEdgeBorder
 import me.rerere.rikkahub.ui.modifier.blurredContainerColor
+import me.rerere.rikkahub.ui.theme.AppShapes
+import me.rerere.rikkahub.ui.theme.AppSize
+import me.rerere.rikkahub.ui.modifier.blurredContainerColor
+import me.rerere.rikkahub.ui.motion.LocalMotionPolicy
 import androidx.compose.ui.draw.clip
 
 internal fun hasConversationMessages(conversation: Conversation): Boolean {
@@ -165,9 +216,50 @@ internal fun hasConversationMessages(conversation: Conversation): Boolean {
 }
 
 internal fun hasConversationPresetMessages(conversation: Conversation, assistant: Assistant): Boolean {
-    if (assistant.presetMessages.isEmpty()) return false
+    if (assistant.presetMessages.isEmpty() && assistant.alternateGreetings.isEmpty()) return false
     val presetIds = assistant.presetMessages.map { it.id }.toSet()
-    return conversation.currentMessages.any { it.id in presetIds }
+    if (conversation.currentMessages.any { it.id in presetIds }) return true
+    if (assistant.alternateGreetings.isNotEmpty()) {
+        val alternatesSet = assistant.alternateGreetings.toSet()
+        if (conversation.currentMessages.any { msg -> msg.role == me.rerere.ai.core.MessageRole.ASSISTANT && msg.toContentText() in alternatesSet }) {
+            return true
+        }
+    }
+    return false
+}
+
+internal fun shouldOfferMessageRegenerate(
+    role: me.rerere.ai.core.MessageRole,
+    isLastTurn: Boolean,
+    previousGroup: me.rerere.rikkahub.ui.components.chat.MessageTurnGroup?,
+): Boolean {
+    if (role == me.rerere.ai.core.MessageRole.ASSISTANT && previousGroup == null) return false
+    return when (role) {
+        me.rerere.ai.core.MessageRole.USER -> true
+        else -> isLastTurn
+    }
+}
+
+internal fun isCharacterIntroMessage(
+    messages: List<me.rerere.ai.ui.UIMessage>,
+    message: me.rerere.ai.ui.UIMessage,
+): Boolean {
+    if (message.role != me.rerere.ai.core.MessageRole.ASSISTANT) return false
+    val index = messages.indexOfFirst { it.id == message.id }
+    if (index < 0) return false
+    return messages.take(index).none { it.role == me.rerere.ai.core.MessageRole.USER }
+}
+
+internal fun completedGenerationIdsAfterDone(
+    currentCompleted: Set<Uuid>,
+    finishedConversationId: Uuid,
+    viewingConversationId: Uuid,
+): Set<Uuid> {
+    return if (finishedConversationId == viewingConversationId) {
+        currentCompleted - viewingConversationId
+    } else {
+        currentCompleted + finishedConversationId
+    }
 }
 
 @Composable
@@ -212,7 +304,11 @@ private fun ChatWidePanelEdgeFadeOverlay(
 ) {
     val backgroundColor = MaterialTheme.colorScheme.background
     val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val topFadeHeight = if (placement == ChatToolbarPlacement.Top) 96.dp else 36.dp
+    val topFadeHeight = if (placement == ChatToolbarPlacement.Top) {
+        chatTopToolbarFadeHeight
+    } else {
+        chatBottomToolbarTopFadeHeight
+    }
     Box(
         modifier = modifier
             .width(width)
@@ -385,26 +481,47 @@ internal fun chatTopBarPlacement(settings: Settings): ChatToolbarPlacement {
     }
 }
 
-internal fun chatListTopPadding(placement: ChatToolbarPlacement): androidx.compose.ui.unit.Dp {
-    return if (placement == ChatToolbarPlacement.Top) 88.dp else 16.dp
+internal fun chatListTopPadding(
+    placement: ChatToolbarPlacement,
+    statusBarPadding: Dp = 0.dp,
+): Dp {
+    val fadeHeight = if (placement == ChatToolbarPlacement.Top) {
+        chatTopToolbarFadeHeight
+    } else {
+        chatBottomToolbarTopFadeHeight
+    }
+    return statusBarPadding + fadeHeight
 }
 
 internal fun chatListBottomPadding(placement: ChatToolbarPlacement): androidx.compose.ui.unit.Dp {
     return if (placement == ChatToolbarPlacement.Bottom) 204.dp else 140.dp
 }
 
-private fun chatToolbarOverflowMenuTransformOrigin(placement: ChatToolbarPlacement): TransformOrigin {
+internal fun chatToolbarPopupTopPadding(placement: ChatToolbarPlacement): androidx.compose.ui.unit.Dp {
+    return if (placement == ChatToolbarPlacement.Top) 64.dp else 0.dp
+}
+
+internal fun chatToolbarPopupBottomPadding(placement: ChatToolbarPlacement): androidx.compose.ui.unit.Dp {
+    return if (placement == ChatToolbarPlacement.Bottom) 72.dp else 0.dp
+}
+
+private fun chatToolbarPopupTransformOrigin(placement: ChatToolbarPlacement): TransformOrigin {
     return if (placement == ChatToolbarPlacement.Bottom) {
-        TransformOrigin(1f, 1f)
+        TransformOrigin(0.5f, 1f)
     } else {
-        TransformOrigin(1f, 0f)
+        TransformOrigin(0.5f, 0f)
     }
 }
 
+private val chatTopToolbarFadeHeight = 96.dp
+private val chatBottomToolbarTopFadeHeight = 36.dp
+
 private fun latestAssistantSpeechMessage(conversation: Conversation): UIMessage? {
-    return conversation.currentMessages.lastOrNull { message ->
-        message.role == MessageRole.ASSISTANT && message.toContentText().isNotBlank()
-    }
+    return conversation.messageNodes.asReversed().asSequence()
+        .map { it.currentMessage }
+        .firstOrNull { message ->
+            message.role == MessageRole.ASSISTANT && message.toContentText().isNotBlank()
+        }
 }
 
 private fun speakablePrefixLength(text: String, final: Boolean): Int {
@@ -414,11 +531,28 @@ private fun speakablePrefixLength(text: String, final: Boolean): Int {
     val paragraphBreak = text.indexOf("\n\n")
     if (paragraphBreak >= 0) return paragraphBreak + 2
 
-    val sentenceBoundary = text.indexOfFirst { it == '.' || it == '!' || it == '?' || it == '。' || it == '！' || it == '？' }
-    if (sentenceBoundary >= 0) return sentenceBoundary + 1
+    for (i in text.indices) {
+        val c = text[i]
+        if (c == '。' || c == '！' || c == '？' || c == '…') {
+            return i + 1
+        }
+        if (c == '!' || c == '?') {
+            return i + 1
+        }
+        if (c == '.') {
+            val prevIsDigit = i > 0 && text[i - 1].isDigit()
+            val nextIsDigit = i + 1 < text.length && text[i + 1].isDigit()
+            if (!prevIsDigit || !nextIsDigit) {
+                val nextIsBoundary = i + 1 == text.length || text[i + 1].isWhitespace() || text[i + 1] == '\n' || text[i + 1] == '"' || text[i + 1] == '\''
+                if (nextIsBoundary) {
+                    return i + 1
+                }
+            }
+        }
+    }
 
-    val softBoundary = text.indexOfFirst { it == '\n' || it == ';' || it == '；' }
-    if (softBoundary >= 0) return softBoundary + 1
+    val lineBreak = text.indexOf('\n')
+    if (lineBreak >= 0) return lineBreak + 1
 
     return if (final) trimmedEnd + 1 else 0
 }
@@ -447,8 +581,19 @@ private fun ChatTtsAutoplayEffect(
     var spokenLength by remember(conversation.id) { mutableStateOf(0) }
     var wasGenerating by remember(conversation.id) { mutableStateOf(false) }
 
-    LaunchedEffect(conversation.id, conversation.currentMessages, loadingJob, mode, provider) {
-        if (mode == TtsAutoplayMode.OFF || provider == null) return@LaunchedEffect
+    // Avoid passing the full conversation.currentMessages list to LaunchedEffect,
+    // which triggers a deep O(N) List.equals comparison across 200k tokens on every chunk.
+    val ttsEnabled = mode != TtsAutoplayMode.OFF && provider != null
+    val speechTriggerKey = if (!ttsEnabled) {
+        null
+    } else if (mode == TtsAutoplayMode.AFTER_GENERATION) {
+        loadingJob == null
+    } else {
+        latestAssistantSpeechMessage(conversation)?.let { it.id to it.toContentText().length }
+    }
+
+    LaunchedEffect(conversation.id, speechTriggerKey, mode, provider) {
+        if (!ttsEnabled) return@LaunchedEffect
         if (loadingJob == null) {
             if (!wasGenerating) return@LaunchedEffect
             wasGenerating = false
@@ -478,6 +623,8 @@ private fun ChatTtsAutoplayEffect(
             completedMessageId = latestMessage.id
             return@LaunchedEffect
         }
+
+        if (mode != TtsAutoplayMode.WHILE_GENERATING) return@LaunchedEffect
 
         if (!wasGenerating) {
             val baselineMessage = latestAssistantSpeechMessage(conversation)
@@ -544,7 +691,7 @@ fun ChatPage(
     // Handle Error
     LaunchedEffect(vm) {
         vm.errorFlow.collect { error ->
-            toaster.show(error.message ?: genericErrorMessage, type = ToastType.Error)
+            toaster.show(error.toLocalInferenceUserMessage(context) ?: genericErrorMessage, type = ToastType.Error)
         }
     }
 
@@ -576,6 +723,14 @@ fun ChatPage(
 
     LaunchedEffect(id, persistenceMode) {
         vm.applyRoutePersistenceMode(ChatPersistenceMode.fromRouteValue(persistenceMode))
+    }
+
+    LaunchedEffect(conversationPersistenceMode) {
+        if (conversationPersistenceMode == ChatPersistenceMode.NORMAL && target.persistenceMode != null) {
+            navController.currentBackStackEntry
+                ?.savedStateHandle
+                ?.set(CHAT_ROUTE_TARGET_KEY, target.copy(persistenceMode = null))
+        }
     }
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -1073,24 +1228,21 @@ private fun ChatPageContent(
     }
     val isTemporaryChat = activePersistenceMode == ChatPersistenceMode.TEMPORARY
 
-    // State for regeneration confirmation dialog
-    var showRegenerateConfirmDialog by rememberSaveable { mutableStateOf(false) }
-    var pendingRegenerateMessage by rememberSaveable { mutableStateOf<me.rerere.ai.ui.UIMessage?>(null) }
     // State for user message regeneration confirmation dialog
     var showUserRegenerateConfirmDialog by rememberSaveable { mutableStateOf(false) }
     var pendingUserRegenerateMessage by rememberSaveable { mutableStateOf<me.rerere.ai.ui.UIMessage?>(null) }
-    // State for user message delete confirmation dialog
-    var showDeleteConfirmDialog by rememberSaveable { mutableStateOf(false) }
-    var pendingDeleteMessage by rememberSaveable { mutableStateOf<me.rerere.ai.ui.UIMessage?>(null) }
     var showToolbarOverflowMenu by remember { mutableStateOf(false) }
+    var showContextUsagePopup by remember { mutableStateOf(false) }
     var isChatShareSelecting by rememberSaveable { mutableStateOf(false) }
     var selectedChatShareItems by remember(conversation.id) { mutableStateOf<Set<Uuid>>(emptySet()) }
     var showExportSheet by remember { mutableStateOf(false) }
     var chatSearchQuery by rememberSaveable(conversation.id) { mutableStateOf(initialSearchQuery.orEmpty()) }
     var consumedInitialSearchQuery by remember(conversation.id) { mutableStateOf<String?>(null) }
     val toolbarPlacement = chatTopBarPlacement(setting)
+    val reduceMotion = LocalMotionPolicy.current.reduceMotion
     val isGenerating = loadingJob != null
     val density = LocalDensity.current
+    val statusBarTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val hazeState = rememberHazeState()
     val localBlur = remember(setting.displaySetting.enableBlurEffect, hazeState) {
         LastChatBlur(
@@ -1099,16 +1251,31 @@ private fun ChatPageContent(
         )
     }
     val blur = inheritedBlur ?: localBlur
+    val requestContextUsage by vm.contextUsage.collectAsStateWithLifecycle()
+    val contextManagementActivity by vm.contextManagementActivity.collectAsStateWithLifecycle()
+    val assistantMemories by vm.assistantMemories.collectAsStateWithLifecycle()
+    val contextMeterUsage = rememberContextMeterUsage(
+        enabled = setting.displaySetting.showContextTokenSummary,
+        model = currentChatModel,
+        conversation = conversation,
+        assistant = currentAssistant,
+        settings = setting,
+        memoryCandidates = assistantMemories,
+        persistenceMode = activePersistenceMode,
+        pendingParts = inputState.getContents(),
+        requestUsage = requestContextUsage,
+        isGenerating = isGenerating,
+    )
+
+    LaunchedEffect(contextMeterUsage) {
+        if (contextMeterUsage == null) showContextUsagePopup = false
+    }
 
     LaunchedEffect(conversation.id) {
         previewMode = false
         showToolbarOverflowMenu = false
-        showRegenerateConfirmDialog = false
-        pendingRegenerateMessage = null
         showUserRegenerateConfirmDialog = false
         pendingUserRegenerateMessage = null
-        showDeleteConfirmDialog = false
-        pendingDeleteMessage = null
         if (isChatShareSelecting) {
             isChatShareSelecting = false
             selectedChatShareItems = emptySet()
@@ -1231,10 +1398,16 @@ private fun ChatPageContent(
                             showCloseAction = previewMode || isChatShareSelecting,
                             showTopFade = true,
                             vm = vm,
+                            contextUsage = contextMeterUsage,
+                            onContextMeterClick = {
+                                showToolbarOverflowMenu = false
+                                showContextUsagePopup = !showContextUsagePopup
+                            },
                             onNewChat = {
                                 navigateToChatPage(navController)
                             },
                             onOpenOverflowMenu = {
+                                showContextUsagePopup = false
                                 showToolbarOverflowMenu = !showToolbarOverflowMenu
                             },
                             onCloseAction = {
@@ -1260,7 +1433,7 @@ private fun ChatPageContent(
                 } else {
                     {
                         ChatTopFadeOverlay(
-                            fadeHeight = 36.dp,
+                            fadeHeight = chatBottomToolbarTopFadeHeight,
                         )
                     }
                 },
@@ -1320,7 +1493,7 @@ private fun ChatPageContent(
                             ) {
                                 ChatList(
                                     innerPadding = PaddingValues(
-                                        top = chatListTopPadding(toolbarPlacement),
+                                        top = chatListTopPadding(toolbarPlacement, statusBarTopPadding),
                                         bottom = chatListBottomPadding(toolbarPlacement)
                                     ),
                                     conversation = frameConversation,
@@ -1349,13 +1522,8 @@ private fun ChatPageContent(
                                             // User message regeneration always truncates - show confirmation
                                             pendingUserRegenerateMessage = message
                                             showUserRegenerateConfirmDialog = true
-                                        } else if (vm.canPreserveVersionHistory(message)) {
-                                            // Simple assistant message - regenerate with version history
-                                            vm.regenerateAtMessage(message, forceWipe = false)
                                         } else {
-                                            // Complex assistant message - show confirmation dialog
-                                            pendingRegenerateMessage = message
-                                            showRegenerateConfirmDialog = true
+                                            vm.regenerateAtMessage(message)
                                         }
                                     },
                                     onEdit = {
@@ -1363,26 +1531,19 @@ private fun ChatPageContent(
                                         inputState.setContents(it.parts)
                                     },
                                     onDelete = { message ->
-                                        if (message.role == me.rerere.ai.core.MessageRole.USER) {
-                                            // User message deletion removes all messages after - show confirmation
-                                            pendingDeleteMessage = message
-                                            showDeleteConfirmDialog = true
-                                        } else {
-                                            // Assistant message deletion - keep existing behavior with undo toast
-                                            scope.launch {
-                                                val backup = frameConversation
-                                                val removedIds = vm.deleteMessage(message)
-                                                toaster.show(
-                                                    message = context.getString(R.string.message_deleted),
-                                                    action = me.rerere.rikkahub.ui.components.ui.ToastAction(
-                                                        label = context.getString(R.string.undo),
-                                                        onClick = {
-                                                            vm.updateConversation(backup)
-                                                            vm.markNodesAsRestored(removedIds)
-                                                        }
-                                                    )
+                                        scope.launch {
+                                            val backup = frameConversation
+                                            val removedIds = vm.deleteMessage(message)
+                                            toaster.show(
+                                                message = context.getString(R.string.message_deleted),
+                                                action = me.rerere.rikkahub.ui.components.ui.ToastAction(
+                                                    label = context.getString(R.string.undo),
+                                                    onClick = {
+                                                        vm.updateConversation(backup)
+                                                        vm.markNodesAsRestored(removedIds)
+                                                    }
                                                 )
-                                            }
+                                            )
                                         }
                                     },
                                     onUpdateMessage = { newNode ->
@@ -1408,7 +1569,9 @@ private fun ChatPageContent(
                                     onForkMessage = {
                                         scope.launch {
                                             val forkConversation = vm.forkMessage(it)
-                                            navigateToChatPage(navController, forkConversation.id)
+                                            if (forkConversation != null) {
+                                                navigateToChatPage(navController, forkConversation.id)
+                                            }
                                         }
                                     },
                                 )
@@ -1551,43 +1714,6 @@ private fun ChatPageContent(
                     )
                 }
 
-                // Regeneration confirmation dialog for complex messages
-                if (showRegenerateConfirmDialog && pendingRegenerateMessage != null) {
-                    AlertDialog(
-                        onDismissRequest = {
-                            showRegenerateConfirmDialog = false
-                            pendingRegenerateMessage = null
-                        },
-                        title = { Text(stringResource(R.string.chat_regenerate_message_title)) },
-                        text = {
-                            Text(stringResource(R.string.chat_regenerate_message_warning))
-                        },
-                        confirmButton = {
-                            TextButton(
-                                onClick = {
-                                    pendingRegenerateMessage?.let { message ->
-                                        vm.regenerateAtMessage(message, forceWipe = true)
-                                    }
-                                    showRegenerateConfirmDialog = false
-                                    pendingRegenerateMessage = null
-                                }
-                            ) {
-                                Text(stringResource(R.string.regenerate))
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(
-                                onClick = {
-                                    showRegenerateConfirmDialog = false
-                                    pendingRegenerateMessage = null
-                                }
-                            ) {
-                                Text(stringResource(R.string.cancel))
-                            }
-                        }
-                    )
-                }
-
                 // User message regeneration confirmation dialog
                 if (showUserRegenerateConfirmDialog && pendingUserRegenerateMessage != null) {
                     AlertDialog(
@@ -1603,7 +1729,7 @@ private fun ChatPageContent(
                             TextButton(
                                 onClick = {
                                     pendingUserRegenerateMessage?.let { message ->
-                                        vm.regenerateAtMessage(message, forceWipe = false)
+                                        vm.regenerateAtMessage(message)
                                     }
                                     showUserRegenerateConfirmDialog = false
                                     pendingUserRegenerateMessage = null
@@ -1617,56 +1743,6 @@ private fun ChatPageContent(
                                 onClick = {
                                     showUserRegenerateConfirmDialog = false
                                     pendingUserRegenerateMessage = null
-                                }
-                            ) {
-                                Text(stringResource(R.string.cancel))
-                            }
-                        }
-                    )
-                }
-
-                // User message delete confirmation dialog
-                if (showDeleteConfirmDialog && pendingDeleteMessage != null) {
-                    AlertDialog(
-                        onDismissRequest = {
-                            showDeleteConfirmDialog = false
-                            pendingDeleteMessage = null
-                        },
-                        title = { Text(stringResource(R.string.chat_delete_user_message_title)) },
-                        text = {
-                            Text(stringResource(R.string.chat_delete_user_message_warning))
-                        },
-                        confirmButton = {
-                            TextButton(
-                                onClick = {
-                                    pendingDeleteMessage?.let { message ->
-                                        scope.launch {
-                                            val backup = conversation
-                                            val removedIds = vm.deleteMessage(message)
-                                            toaster.show(
-                                                message = context.getString(R.string.message_deleted),
-                                                action = me.rerere.rikkahub.ui.components.ui.ToastAction(
-                                                    label = context.getString(R.string.undo),
-                                                    onClick = {
-                                                        vm.updateConversation(backup)
-                                                        vm.markNodesAsRestored(removedIds)
-                                                    }
-                                                )
-                                            )
-                                        }
-                                    }
-                                    showDeleteConfirmDialog = false
-                                    pendingDeleteMessage = null
-                                }
-                            ) {
-                                Text(stringResource(R.string.delete))
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(
-                                onClick = {
-                                    showDeleteConfirmDialog = false
-                                    pendingDeleteMessage = null
                                 }
                             ) {
                                 Text(stringResource(R.string.cancel))
@@ -1723,10 +1799,16 @@ private fun ChatPageContent(
                             isGenerating = isGenerating,
                             showCloseAction = previewMode || isChatShareSelecting,
                             vm = vm,
+                            contextUsage = contextMeterUsage,
+                            onContextMeterClick = {
+                                showToolbarOverflowMenu = false
+                                showContextUsagePopup = !showContextUsagePopup
+                            },
                             onNewChat = {
                                 navigateToChatPage(navController)
                             },
                             onOpenOverflowMenu = {
+                                showContextUsagePopup = false
                                 showToolbarOverflowMenu = !showToolbarOverflowMenu
                             },
                             onCloseAction = {
@@ -1810,6 +1892,7 @@ private fun ChatPageContent(
                         }
                     },
                     onCancelClick = {
+                        vm.stopGeneration()
                         loadingJob?.cancel()
                     },
                     enableSearch = enableWebSearch,
@@ -1901,52 +1984,112 @@ private fun ChatPageContent(
                 )
                 }
 
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = showToolbarOverflowMenu,
-                        enter = fadeIn(
-                            animationSpec = androidx.compose.animation.core.spring(
-                                dampingRatio = 0.75f,
-                                stiffness = 360f
-                            )
-                        ) + scaleIn(
-                            initialScale = 0.96f,
-                            transformOrigin = chatToolbarOverflowMenuTransformOrigin(toolbarPlacement),
-                            animationSpec = androidx.compose.animation.core.spring(
-                                dampingRatio = 0.75f,
-                                stiffness = 360f
-                            )
-                        ),
-                        exit = fadeOut(
-                            animationSpec = androidx.compose.animation.core.spring(
-                                dampingRatio = 0.85f,
-                                stiffness = 420f
-                            )
-                        ) + scaleOut(
-                            targetScale = 0.96f,
-                            transformOrigin = chatToolbarOverflowMenuTransformOrigin(toolbarPlacement),
-                            animationSpec = androidx.compose.animation.core.spring(
-                                dampingRatio = 0.85f,
-                                stiffness = 420f
-                            )
-                        ),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                            ChatToolbarOverflowMenu(
-                                placement = toolbarPlacement,
-                                previewMode = previewMode,
-                                hasConversationContent = conversation.messageNodes.isNotEmpty(),
-                                chatListState = chatListState,
-                                onDismissRequest = { showToolbarOverflowMenu = false },
-                            onSearchClick = {
-                                showToolbarOverflowMenu = false
-                                previewMode = !previewMode
-                            },
-                            onShareClick = {
-                                startChatShareSelection()
-                            }
-                        )
-                    }
                 }
+            }
+
+            // Popups are siblings placed after Scaffold so its top fade can never draw over them.
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showContextUsagePopup && contextMeterUsage != null,
+                enter = if (reduceMotion) {
+                    fadeIn(tween(90))
+                } else fadeIn(
+                    animationSpec = androidx.compose.animation.core.spring(
+                        dampingRatio = 0.75f,
+                        stiffness = 360f,
+                    )
+                ),
+                exit = if (reduceMotion) {
+                    fadeOut(tween(80))
+                } else fadeOut(
+                    animationSpec = androidx.compose.animation.core.spring(
+                        dampingRatio = 0.85f,
+                        stiffness = 420f,
+                    )
+                ),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                val popupScale by transition.animateFloat(
+                    transitionSpec = {
+                        if (targetState == EnterExitState.Visible) {
+                            androidx.compose.animation.core.spring(
+                                dampingRatio = 0.75f,
+                                stiffness = 360f,
+                            )
+                        } else {
+                            androidx.compose.animation.core.spring(
+                                dampingRatio = 0.85f,
+                                stiffness = 420f,
+                            )
+                        }
+                    },
+                    label = "chat_context_usage_popup_scale",
+                ) { state ->
+                    if (reduceMotion || state == EnterExitState.Visible) 1f else 0.96f
+                }
+                contextMeterUsage?.let { usage ->
+                    ContextUsageOverlay(
+                        usage = usage,
+                        activity = contextManagementActivity,
+                        placement = toolbarPlacement,
+                        popupScale = popupScale,
+                        model = currentChatModel,
+                        onUpdateModelLimit = { newLimit ->
+                            currentChatModel?.let { model ->
+                                vm.updateModelContextLimit(model.id, newLimit)
+                            }
+                        },
+                        onDismissRequest = { showContextUsagePopup = false },
+                    )
+                }
+            }
+
+            androidx.compose.animation.AnimatedVisibility(
+                visible = showToolbarOverflowMenu,
+                enter = fadeIn(
+                    animationSpec = androidx.compose.animation.core.spring(
+                        dampingRatio = 0.75f,
+                        stiffness = 360f,
+                    )
+                ),
+                exit = fadeOut(
+                    animationSpec = androidx.compose.animation.core.spring(
+                        dampingRatio = 0.85f,
+                        stiffness = 420f,
+                    )
+                ),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                val menuScale by transition.animateFloat(
+                    transitionSpec = {
+                        if (targetState == EnterExitState.Visible) {
+                            androidx.compose.animation.core.spring(
+                                dampingRatio = 0.75f,
+                                stiffness = 360f,
+                            )
+                        } else {
+                            androidx.compose.animation.core.spring(
+                                dampingRatio = 0.85f,
+                                stiffness = 420f,
+                            )
+                        }
+                    },
+                    label = "chat_toolbar_overflow_menu_scale",
+                ) { state ->
+                    if (state == EnterExitState.Visible) 1f else 0.96f
+                }
+                ChatToolbarOverflowMenu(
+                    placement = toolbarPlacement,
+                    menuScale = menuScale,
+                    previewMode = previewMode,
+                    hasConversationContent = conversation.messageNodes.isNotEmpty(),
+                    chatListState = chatListState,
+                    onDismissRequest = { showToolbarOverflowMenu = false },
+                    onSearchClick = {
+                        showToolbarOverflowMenu = false
+                        previewMode = !previewMode
+                    },
+                    onShareClick = { startChatShareSelection() },
+                )
             }
         }
         }
@@ -2078,11 +2221,11 @@ private fun ChatSearchModeBar(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 56.dp)
+            .heightIn(min = AppSize.ChromeBar)
             .lastChatBlurEffect(containerColor, searchFieldShape),
         shape = searchFieldShape,
         color = blurredContainerColor(containerColor),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.background)
+        border = lastChatSoftEdgeBorder()
     ) {
         OutlinedTextField(
             value = query,
@@ -2131,15 +2274,15 @@ private fun ChatShareSelectionModeBar(
     onConfirm: () -> Unit,
 ) {
     val haptics = rememberPremiumHaptics()
-    val shape = RoundedCornerShape(999.dp)
+    val shape = AppShapes.ButtonPill
     val containerColor = MaterialTheme.colorScheme.surfaceContainer
     Surface(
         shape = shape,
         color = blurredContainerColor(containerColor),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.background),
+        border = lastChatSoftEdgeBorder(),
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(AppSize.ChromeBar)
             .lastChatBlurEffect(containerColor, shape)
     ) {
         Row(
@@ -2149,7 +2292,7 @@ private fun ChatShareSelectionModeBar(
         ) {
             Tooltip(tooltip = { Text(stringResource(R.string.chat_clear_selection)) }) {
                 IconButton(
-                    modifier = Modifier.size(44.dp),
+                    modifier = Modifier.size(AppSize.ChromePill),
                     onClick = {
                         haptics.perform(HapticPattern.Pop)
                         onCancel()
@@ -2174,7 +2317,7 @@ private fun ChatShareSelectionModeBar(
 
             Tooltip(tooltip = { Text(stringResource(R.string.select_all)) }) {
                 IconButton(
-                    modifier = Modifier.size(44.dp),
+                    modifier = Modifier.size(AppSize.ChromePill),
                     onClick = {
                         haptics.perform(HapticPattern.Pop)
                         onToggleSelectAll()
@@ -2195,7 +2338,7 @@ private fun ChatShareSelectionModeBar(
 
             Tooltip(tooltip = { Text(stringResource(R.string.confirm)) }) {
                 FilledIconButton(
-                    modifier = Modifier.size(44.dp),
+                    modifier = Modifier.size(AppSize.ChromePill),
                     enabled = selectedCount > 0,
                     onClick = {
                         haptics.perform(HapticPattern.Success)
@@ -2216,6 +2359,7 @@ private fun ChatShareSelectionModeBar(
 @Composable
 private fun ChatToolbarOverflowMenu(
     placement: ChatToolbarPlacement,
+    menuScale: Float,
     previewMode: Boolean,
     hasConversationContent: Boolean,
     chatListState: LazyListState,
@@ -2227,11 +2371,11 @@ private fun ChatToolbarOverflowMenu(
 
     var dragDismissInProgress by remember { mutableStateOf(false) }
     val scrimInteractionSource = remember { MutableInteractionSource() }
-    val menuShape = RoundedCornerShape(24.dp)
+    val menuShape = AppShapes.CardMedium
     val containerColor = MaterialTheme.colorScheme.surfaceContainer
-    val border = BorderStroke(1.dp, MaterialTheme.colorScheme.background)
-    val menuTopPadding = if (placement == ChatToolbarPlacement.Top) 64.dp else 0.dp
-    val menuBottomPadding = if (placement == ChatToolbarPlacement.Bottom) 72.dp else 0.dp
+    val border = lastChatSoftEdgeBorder()
+    val menuTopPadding = chatToolbarPopupTopPadding(placement)
+    val menuBottomPadding = chatToolbarPopupBottomPadding(placement)
     val scrimAlpha by androidx.compose.animation.core.animateFloatAsState(
         targetValue = if (dragDismissInProgress) 0f else 0.16f,
         animationSpec = androidx.compose.animation.core.spring(
@@ -2292,6 +2436,11 @@ private fun ChatToolbarOverflowMenu(
                     )
                     .padding(top = menuTopPadding, bottom = menuBottomPadding, end = 16.dp)
                     .widthIn(min = 196.dp, max = 260.dp)
+                    .graphicsLayer {
+                        scaleX = 1f
+                        scaleY = menuScale
+                        transformOrigin = chatToolbarPopupTransformOrigin(placement)
+                    }
                     .lastChatBlurEffect(containerColor, menuShape)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -2657,7 +2806,7 @@ fun UpdatePill(
         shape = pillShape,
         color = blurredContainerColor(containerColor),
         contentColor = contentColor,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.background),
+        border = lastChatSoftEdgeBorder(),
         modifier = Modifier
             .height(height)
             .lastChatBlurEffect(containerColor, pillShape)
@@ -2709,6 +2858,8 @@ private fun ChatToolbar(
     showCloseAction: Boolean,
     showTopFade: Boolean = true,
     vm: ChatVM,
+    contextUsage: ContextUsageBreakdown?,
+    onContextMeterClick: () -> Unit,
     onNewChat: () -> Unit,
     onOpenOverflowMenu: () -> Unit,
     onCloseAction: () -> Unit,
@@ -2718,14 +2869,14 @@ private fun ChatToolbar(
 ) {
     val scope = rememberCoroutineScope()
     val topContainerColor = MaterialTheme.colorScheme.surfaceContainer
-    val topContainerBorder = BorderStroke(1.dp, MaterialTheme.colorScheme.background)
-    val buttonShape = RoundedCornerShape(999.dp)
-    val topPillSize = 48.dp
+    val topContainerBorder = lastChatSoftEdgeBorder()
+    val buttonShape = AppShapes.ButtonPill
+    val topPillSize = AppSize.ChromePill
     // State for assistant picker - must be at function level for proper recomposition
     var showAssistantPicker by remember { mutableStateOf(false) }
     val isEmpty = !conversation.messageNodes.any { it.role == me.rerere.ai.core.MessageRole.USER }
     val rawActionMode = run {
-        val hasPresetMessages = currentAssistant.presetMessages.isNotEmpty()
+        val hasPresetMessages = currentAssistant.presetMessages.isNotEmpty() || currentAssistant.alternateGreetings.isNotEmpty()
         val effectiveDisplay = settings.getEffectiveDisplaySetting(currentAssistant)
         val headerShowsAvatar = effectiveDisplay.newChatShowAvatar && (
             effectiveDisplay.newChatHeaderStyle == me.rerere.rikkahub.data.datastore.NewChatHeaderStyle.BIG_ICON ||
@@ -2763,7 +2914,7 @@ private fun ChatToolbar(
     ) {
         if (placement == ChatToolbarPlacement.Top && showTopFade) {
             ChatTopFadeOverlay(
-                fadeHeight = 96.dp,
+                fadeHeight = chatTopToolbarFadeHeight,
                 modifier = Modifier.align(Alignment.TopCenter)
             )
         }
@@ -2785,25 +2936,27 @@ private fun ChatToolbar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (!bigScreen) {
-                Surface(
+                LastChatMenuButton(
                     onClick = {
                         scope.launch { drawerState.open() }
                     },
+                    contentDescription = "Messages",
                     shape = buttonShape,
-                    color = blurredContainerColor(topContainerColor),
+                    containerColor = blurredContainerColor(topContainerColor),
                     border = topContainerBorder,
                     modifier = Modifier
                         .size(topPillSize)
-                        .lastChatBlurEffect(topContainerColor, buttonShape)
-                ) {
-                    Box(
-                        modifier = Modifier.size(topPillSize),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Rounded.Menu, "Messages")
-                    }
-                }
+                        .zIndex(2f)
+                        .lastChatBlurEffect(topContainerColor, buttonShape),
+                    size = topPillSize,
+                )
             }
+
+            ContextMeterAnchor(
+                usage = contextUsage,
+                onClick = onContextMeterClick,
+                modifier = Modifier.padding(start = if (bigScreen) 0.dp else 8.dp),
+            )
 
             Spacer(Modifier.weight(1f))
             
@@ -2901,4 +3054,1018 @@ private fun ChatToolbar(
             onDismiss = { showAssistantPicker = false }
         )
     }
+}
+
+@Composable
+private fun rememberContextMeterUsage(
+    enabled: Boolean,
+    model: Model?,
+    conversation: Conversation,
+    assistant: Assistant,
+    settings: Settings,
+    memoryCandidates: List<AssistantMemory>,
+    persistenceMode: ChatPersistenceMode,
+    pendingParts: List<UIMessagePart>,
+    requestUsage: ContextUsageBreakdown?,
+    isGenerating: Boolean = false,
+): ContextUsageBreakdown? {
+    if (!enabled) return null
+    val activeModel = model?.takeIf { (it.contextCapacityTokens ?: 0) > 0 } ?: return null
+    var lastStableUsage by remember(conversation.id) { mutableStateOf<ContextUsageBreakdown?>(null) }
+    val hasPendingInput = pendingParts.any { part ->
+        part !is UIMessagePart.Text || part.text.isNotBlank()
+    }
+    // During active generation streaming, avoid recomputing 200k+ token breakdowns on the UI thread 40 times/sec.
+    // requestUsage contains the exact context breakdown computed at request start.
+    if (isGenerating && !hasPendingInput) {
+        if (requestUsage != null) return requestUsage
+        if (lastStableUsage != null) return lastStableUsage
+    }
+    val smartActive = assistant.smartContextManagement && (activeModel.contextCapacityTokens ?: 0) > 0
+    val rawMessages = conversation.currentMessages
+    val messages = effectiveHistoryForContext(
+        messages = rawMessages,
+        smartManagement = smartActive,
+        summaryUpToIndex = conversation.contextSummaryUpToIndex.takeIf {
+            !conversation.contextSummary.isNullOrBlank()
+        } ?: -1,
+        truncateIndex = conversation.truncateIndex,
+        manualHistoryLimit = assistant.maxHistoryMessages,
+    )
+    val memoryContextEnabled = assistant.enableMemory && persistenceMode == ChatPersistenceMode.NORMAL
+    val eligibleMemoryCandidates = remember(memoryCandidates, assistant, memoryContextEnabled) {
+        if (!memoryContextEnabled) {
+            emptyList()
+        } else if (!assistant.useRagMemoryRetrieval) {
+            memoryCandidates.filter { memory -> memory.type == 0 }.take(50)
+        } else {
+            memoryCandidates.filter { memory ->
+                (memory.type == 0 && assistant.ragIncludeCore) ||
+                    (memory.type == 1 && assistant.ragIncludeEpisodes)
+            }.take(1_000)
+        }
+    }
+    val memoryRevision = remember(eligibleMemoryCandidates) {
+        eligibleMemoryCandidates.map { memory ->
+            listOf(memory.id, memory.content, memory.type, memory.timestamp)
+        }.hashCode()
+    }
+    val sourceKey = remember(conversation, assistant, activeModel, settings, memoryRevision) {
+        contextUsageSourceKey(conversation, assistant, activeModel, settings, memoryRevision)
+    }
+    val matchingRequestUsage = requestUsage?.takeIf { usage -> usage.sourceKey == sourceKey }
+    if (!hasPendingInput && matchingRequestUsage != null) return matchingRequestUsage
+
+    val observedMemoryTokenTotals = rawMessages.asReversed().mapNotNull { message ->
+        message.usedMemories.orEmpty()
+            .sumOf { memory ->
+                memory.contextTokenCount
+                    ?: ContextTokenEstimator.textTokens(memory.memoryContent, activeModel)
+            }
+            .takeIf { it > 0 }
+    }.take(6)
+    val availableSkills = settings.skills.filter { skill ->
+        skill.enabled && skill.instructions.isNotBlank()
+    }
+    val allSkillIds = availableSkills.map { skill -> skill.id }.toSet()
+    val assistantAvailableSkillIds = availableSkills
+        .filter { skill -> skill.isAvailableForAssistant(assistant.id) }
+        .map { skill -> skill.id }
+        .toSet()
+    val activeSkillIds = resolveActiveSkillIds(
+        assistantDefaultSkillIds = assistant.enabledSkillIds.intersect(assistantAvailableSkillIds),
+        conversationSkillIds = conversation.enabledModeIds,
+        turnScopedSkillIds = emptySet(),
+        allSkillIds = allSkillIds,
+        alwaysEnabledSkillIds = availableSkills
+            .filter { skill -> skill.alwaysEnabled && skill.id in assistantAvailableSkillIds }
+            .map { skill -> skill.id }
+            .toSet(),
+    )
+    val activeLorebookIds = conversation.enabledLorebookIds ?: assistant.enabledLorebookIds
+    val activeLoreEntries = remember(settings.lorebooks, activeLorebookIds) {
+        settings.lorebooks
+            .filter { lorebook -> lorebook.enabled && lorebook.id in activeLorebookIds }
+            .flatMap { lorebook -> lorebook.entries.filter { it.enabled } }
+    }
+    val deterministicLoreEntries = remember(activeLoreEntries, rawMessages) {
+        val recentText = rawMessages.takeLast(10).joinToString(" ") { message -> message.toText() }
+        activeLoreEntries.filter { entry ->
+            when (entry.activationType) {
+                LorebookActivationType.ALWAYS -> true
+                LorebookActivationType.RAG -> false
+                LorebookActivationType.KEYWORDS -> entry.keywords.any { keyword ->
+                    if (entry.useRegex) {
+                        runCatching {
+                            val options = if (entry.caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE)
+                            Regex(keyword, options).containsMatchIn(recentText)
+                        }.getOrDefault(false)
+                    } else if (entry.caseSensitive) {
+                        recentText.contains(keyword)
+                    } else {
+                        recentText.contains(keyword, ignoreCase = true)
+                    }
+                }
+            }
+        }
+    }
+    fun loreEntryTokenCost(entry: me.rerere.rikkahub.data.model.LorebookEntry): Int =
+        ContextTokenEstimator.textTokens(entry.prompt, activeModel) +
+            entry.attachments.sumOf { attachment ->
+                when (attachment.type) {
+                    ModeAttachmentType.IMAGE -> 1_024
+                    ModeAttachmentType.VIDEO -> 4_096
+                    ModeAttachmentType.AUDIO -> 2_000
+                    ModeAttachmentType.DOCUMENT -> 512
+                }
+            }
+    val loreEntryTokensById = remember(activeLoreEntries, activeModel) {
+        activeLoreEntries.associate { entry ->
+            entry.id.toString() to loreEntryTokenCost(entry)
+        }
+    }
+    val observedConditionalTokenTotals = rawMessages.asReversed().mapNotNull { message ->
+        message.usedLorebookEntries.orEmpty()
+            .filter { it.activationReason?.startsWith("RAG Match") == true }
+            .sumOf { used ->
+                used.contextTokenCount ?: loreEntryTokensById[used.entryId] ?: 0
+            }
+            .takeIf { it > 0 }
+    }.take(6)
+    val conditionalContextCandidateTokens = remember(activeLoreEntries, loreEntryTokensById) {
+        activeLoreEntries
+            .filter { it.activationType == LorebookActivationType.RAG }
+            .sumOf { entry -> loreEntryTokensById[entry.id.toString()] ?: 0 }
+    }
+    val eligibleMemoryCandidateTokens = remember(eligibleMemoryCandidates, activeModel) {
+        eligibleMemoryCandidates.sumOf { memory ->
+            ContextTokenEstimator.textTokens(memory.content, activeModel).toLong()
+        }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+    val probableTemporaryTokens = probableTemporaryTokenReserve(
+        model = activeModel,
+        requestedOutputTokens = assistant.maxTokens,
+        memoryEnabled = memoryContextEnabled,
+        memoryRecallIsConditional = assistant.useRagMemoryRetrieval,
+        memoryCandidateLimit = if (assistant.ragLimit > 50) 1_000 else assistant.ragLimit,
+        memoryCandidateTokens = eligibleMemoryCandidateTokens,
+        memoryBudgetFraction = when (assistant.contextPriority) {
+            me.rerere.rikkahub.data.model.ContextPriority.CHAT_HISTORY -> 0.20
+            me.rerere.rikkahub.data.model.ContextPriority.BALANCED -> 0.40
+            me.rerere.rikkahub.data.model.ContextPriority.MEMORIES -> 0.65
+        },
+        observedMemoryTokenTotals = observedMemoryTokenTotals,
+        conditionalContextCandidateTokens = conditionalContextCandidateTokens,
+        observedConditionalTokenTotals = observedConditionalTokenTotals,
+    )
+    val skillText = remember(availableSkills, activeSkillIds) {
+        buildString {
+            availableSkills
+                .filter { skill -> skill.id in activeSkillIds }
+                .forEach { skill ->
+                    appendLine(skill.name)
+                    appendLine(skill.instructions)
+                }
+        }
+    }
+    val lorebookText = remember(deterministicLoreEntries) {
+        deterministicLoreEntries.joinToString("\n") { entry -> entry.prompt }
+    }
+    val skillTokens = remember(skillText, activeModel) {
+        ContextTokenEstimator.textTokens(skillText, activeModel)
+    }
+    val lorebookTokens = remember(lorebookText, activeModel) {
+        ContextTokenEstimator.textTokens(lorebookText, activeModel)
+    }
+    fun me.rerere.rikkahub.data.model.ModeAttachment.toContextPart(): UIMessagePart = when (type) {
+        ModeAttachmentType.IMAGE -> UIMessagePart.Image(url)
+        ModeAttachmentType.VIDEO -> UIMessagePart.Video(url)
+        ModeAttachmentType.AUDIO -> UIMessagePart.Audio(url)
+        ModeAttachmentType.DOCUMENT -> UIMessagePart.Document(url, fileName, mime)
+    }
+    val knownContextAttachments = remember(availableSkills, activeSkillIds, deterministicLoreEntries) {
+        buildList {
+            availableSkills
+                .filter { skill -> skill.id in activeSkillIds }
+                .flatMapTo(this) { skill -> skill.attachments.map { it.toContextPart() } }
+            deterministicLoreEntries
+                .flatMapTo(this) { entry -> entry.attachments.map { it.toContextPart() } }
+        }
+    }
+    val knownContextMediaTokens = remember(knownContextAttachments, activeModel) {
+        knownContextAttachments.sumOf { part ->
+            ContextTokenEstimator.partTokens(part, activeModel)
+        }
+    }
+    val toolAccounting = remember(
+        activeModel,
+        assistant.localTools,
+        assistant.mcpServers,
+        settings.mcpServers,
+    ) {
+        if (ModelAbility.TOOL !in activeModel.abilities) return@remember "" to 0
+        val activeMcpTools = settings.mcpServers
+            .filter { server -> server.commonOptions.enable && server.id in assistant.mcpServers }
+            .flatMap { server -> server.commonOptions.tools.filter { tool -> tool.enable } }
+        val localPreviews = assistant.localTools.flatMap { it.toDefinitionPreviews() }
+        val definitionText = buildString {
+            localPreviews.forEach { tool ->
+                appendLine(
+                    ContextTokenEstimator.toolDefinitionText(
+                        name = tool.name,
+                        description = tool.description,
+                        schema = tool.schema,
+                    )
+                )
+            }
+            activeMcpTools.forEach { tool ->
+                appendLine(
+                    ContextTokenEstimator.toolDefinitionText(
+                        name = tool.name,
+                        description = tool.description.orEmpty(),
+                        schema = tool.inputSchema,
+                    )
+                )
+            }
+        }
+        val localTokens = localPreviews.sumOf { tool ->
+            ContextTokenEstimator.toolDefinitionTokens(
+                name = tool.name,
+                description = tool.description,
+                schema = tool.schema,
+                model = activeModel,
+            ).toLong()
+        }
+        val mcpTokens = activeMcpTools.sumOf { tool ->
+            ContextTokenEstimator.toolDefinitionTokens(
+                name = tool.name,
+                description = tool.description.orEmpty(),
+                schema = tool.inputSchema,
+                model = activeModel,
+            ).toLong()
+        }
+        definitionText to (localTokens + mcpTokens)
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+    }
+    val toolDefinitionText = toolAccounting.first
+    // Once a request has resolved runtime/local/MCP/memory tools, retain that exact definition
+    // cost while typing instead of falling back to the necessarily incomplete settings preview.
+    val toolDefinitionTokens = matchingRequestUsage?.toolDefinitionTokens ?: toolAccounting.second
+    val systemPromptText = buildString {
+        append(assistant.systemPrompt)
+        if (assistant.learningMode) {
+            appendLine()
+            append(settings.learningModePrompt.ifEmpty { DEFAULT_LEARNING_MODE_PROMPT })
+        }
+        buildTimeAwarenessBlock(
+            enabled = assistant.enableTimeAwareness,
+            fullMessages = rawMessages,
+            retainedMessages = messages,
+        )?.let { block ->
+            appendLine()
+            append(block)
+        }
+    }
+    val baseSmartInputBudget = if (smartActive) {
+        smartInputBudget(activeModel, assistant.maxTokens)
+    } else {
+        null
+    }
+    val deterministicContextTokens = ContextTokenEstimator.textTokens(systemPromptText, activeModel) +
+        ContextTokenEstimator.textTokens(conversation.contextSummary.orEmpty(), activeModel) +
+        skillTokens + lorebookTokens + toolDefinitionTokens + knownContextMediaTokens
+    val fixedMemorySelection = remember(
+        eligibleMemoryCandidates,
+        activeModel,
+        baseSmartInputBudget,
+        deterministicContextTokens,
+        messages,
+        assistant.contextPriority,
+        assistant.useRagMemoryRetrieval,
+    ) {
+        if (
+            !smartActive || assistant.useRagMemoryRetrieval ||
+            eligibleMemoryCandidates.isEmpty() || baseSmartInputBudget == null
+        ) {
+            null
+        } else {
+            selectSmartMemoryContext(
+                candidates = eligibleMemoryCandidates,
+                model = activeModel,
+                inputBudgetTokens = baseSmartInputBudget,
+                requiredContextTokens = deterministicContextTokens,
+                historyMessages = messages,
+                contextPriority = assistant.contextPriority,
+                episodeGroup = { "Older" },
+            )
+        }
+    }
+    val fixedMemoryText = fixedMemorySelection?.promptText.orEmpty()
+    val fixedMemoryTokens = fixedMemorySelection?.promptTokens ?: 0
+    val effectiveSmartInputBudget = baseSmartInputBudget?.let { budget ->
+        (budget - probableTemporaryTokens).coerceAtLeast(1)
+    }
+
+    val baseBreakdown = remember(
+        messages,
+        activeModel,
+        systemPromptText,
+        conversation.contextSummary,
+        fixedMemoryText,
+        fixedMemoryTokens,
+        skillText,
+        lorebookText,
+        skillTokens,
+        lorebookTokens,
+        toolDefinitionText,
+        toolDefinitionTokens,
+        knownContextAttachments,
+        effectiveSmartInputBudget,
+        sourceKey,
+    ) {
+        val messagesToCount = if (smartActive) {
+            val namedTokens = ContextTokenEstimator.textTokens(systemPromptText, activeModel) +
+                ContextTokenEstimator.textTokens(conversation.contextSummary.orEmpty(), activeModel) +
+                fixedMemoryTokens + skillTokens + lorebookTokens +
+                toolDefinitionTokens +
+                knownContextMediaTokens
+            val messageBudget = ((effectiveSmartInputBudget ?: Int.MAX_VALUE) - namedTokens)
+                .coerceAtLeast(1)
+            smartFitContext(
+                messages = messages,
+                model = activeModel,
+                messageBudgetTokens = messageBudget,
+            )
+        } else {
+            messages
+        }
+        ContextTokenEstimator.breakdown(
+            messages = messagesToCount,
+            model = activeModel,
+            systemPromptText = systemPromptText,
+            summaryText = conversation.contextSummary.orEmpty(),
+            memoryText = fixedMemoryText,
+            memoryTokensOverride = fixedMemoryTokens,
+            skillText = skillText,
+            lorebookText = lorebookText,
+            skillTokensOverride = skillTokens,
+            lorebookTokensOverride = lorebookTokens,
+            toolDefinitionText = toolDefinitionText,
+            toolDefinitionTokensOverride = toolDefinitionTokens,
+            pendingParts = knownContextAttachments,
+            usableInputTokens = effectiveSmartInputBudget,
+            sourceKey = sourceKey,
+        )
+    }
+
+    val computedBreakdown = if (!hasPendingInput) {
+        baseBreakdown
+    } else {
+        var pendingTextTokens = 0
+        var pendingMediaTokens = 0
+        var pendingImages = 0
+        pendingParts.forEach { part ->
+            when (part) {
+                is UIMessagePart.Image -> {
+                    pendingMediaTokens += ContextTokenEstimator.partTokens(part, activeModel)
+                    pendingImages++
+                }
+                is UIMessagePart.Video, is UIMessagePart.Audio, is UIMessagePart.Document -> {
+                    pendingMediaTokens += ContextTokenEstimator.partTokens(part, activeModel)
+                }
+                else -> {
+                    pendingTextTokens += ContextTokenEstimator.partTokens(part, activeModel)
+                }
+            }
+        }
+        val framingDelta = if (messages.isEmpty()) 7 else 4
+        val estimatedTotalTokens = baseBreakdown.usedTokens + pendingTextTokens + pendingMediaTokens + framingDelta
+        val budgetLimit = effectiveSmartInputBudget ?: Int.MAX_VALUE
+
+        if (smartActive && estimatedTotalTokens > budgetLimit) {
+            val pendingMessage = UIMessage(role = MessageRole.USER, parts = pendingParts)
+            val namedTokens = ContextTokenEstimator.textTokens(systemPromptText, activeModel) +
+                ContextTokenEstimator.textTokens(conversation.contextSummary.orEmpty(), activeModel) +
+                fixedMemoryTokens + skillTokens + lorebookTokens +
+                toolDefinitionTokens +
+                knownContextMediaTokens
+            val messageBudget = (budgetLimit - namedTokens).coerceAtLeast(1)
+            val messagesToCount = smartFitContext(
+                messages = messages + listOf(pendingMessage),
+                model = activeModel,
+                messageBudgetTokens = messageBudget,
+            )
+            ContextTokenEstimator.breakdown(
+                messages = messagesToCount,
+                model = activeModel,
+                systemPromptText = systemPromptText,
+                summaryText = conversation.contextSummary.orEmpty(),
+                memoryText = fixedMemoryText,
+                memoryTokensOverride = fixedMemoryTokens,
+                skillText = skillText,
+                lorebookText = lorebookText,
+                skillTokensOverride = skillTokens,
+                lorebookTokensOverride = lorebookTokens,
+                toolDefinitionText = toolDefinitionText,
+                toolDefinitionTokensOverride = toolDefinitionTokens,
+                pendingParts = knownContextAttachments,
+                usableInputTokens = effectiveSmartInputBudget,
+                sourceKey = sourceKey,
+            )
+        } else {
+            baseBreakdown.copy(
+                conversationTokens = baseBreakdown.conversationTokens + pendingTextTokens + framingDelta,
+                mediaTokens = baseBreakdown.mediaTokens + pendingMediaTokens,
+                imageCount = baseBreakdown.imageCount + pendingImages,
+                usedTokens = estimatedTotalTokens,
+            )
+        }
+    }
+    lastStableUsage = computedBreakdown
+    return computedBreakdown
+}
+
+@Composable
+private fun ContextUsageOverlay(
+    usage: ContextUsageBreakdown,
+    activity: ContextManagementActivity?,
+    placement: ChatToolbarPlacement,
+    popupScale: Float,
+    model: Model? = null,
+    onUpdateModelLimit: ((Int?) -> Unit)? = null,
+    onDismissRequest: () -> Unit,
+) {
+    BackHandler(onBack = onDismissRequest)
+    val interactionSource = remember { MutableInteractionSource() }
+    val shape = AppShapes.CardMedium
+    val containerColor = MaterialTheme.colorScheme.surfaceContainer
+    val border = lastChatSoftEdgeBorder()
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.16f))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onDismissRequest,
+            )
+    ) {
+        Surface(
+            shape = shape,
+            color = blurredContainerColor(containerColor),
+            border = border,
+            modifier = Modifier
+                .align(
+                    if (placement == ChatToolbarPlacement.Top) Alignment.TopCenter
+                    else Alignment.BottomCenter
+                )
+                .then(
+                    if (placement == ChatToolbarPlacement.Top) Modifier.statusBarsPadding()
+                    else Modifier.navigationBarsPadding()
+                )
+                .padding(
+                    top = chatToolbarPopupTopPadding(placement),
+                    bottom = chatToolbarPopupBottomPadding(placement),
+                    start = 16.dp,
+                    end = 16.dp,
+                )
+                .fillMaxWidth()
+                .graphicsLayer {
+                    scaleX = 1f
+                    scaleY = popupScale
+                    transformOrigin = chatToolbarPopupTransformOrigin(placement)
+                }
+                .lastChatBlurEffect(containerColor, shape)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                )
+        ) {
+            ContextUsagePopupContent(
+                usage = usage,
+                activity = activity,
+                model = model,
+                onUpdateModelLimit = onUpdateModelLimit,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContextMeterAnchor(
+    usage: ContextUsageBreakdown?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val motionPolicy = LocalMotionPolicy.current
+    var displayedUsage by remember { mutableStateOf<ContextUsageBreakdown?>(usage) }
+    LaunchedEffect(usage) {
+        if (usage != null) displayedUsage = usage
+    }
+    val haptics = rememberPremiumHaptics()
+    val enter = if (motionPolicy.reduceMotion) {
+        fadeIn(tween(90))
+    } else {
+        fadeIn(tween(180)) + expandHorizontally(expandFrom = Alignment.Start) +
+            slideInHorizontally(animationSpec = spring(dampingRatio = 0.72f, stiffness = 420f)) { -it / 2 }
+    }
+    val exit = if (motionPolicy.reduceMotion) {
+        fadeOut(tween(80))
+    } else {
+        fadeOut(tween(140)) + shrinkHorizontally(shrinkTowards = Alignment.Start) +
+            slideOutHorizontally(animationSpec = spring(dampingRatio = 0.82f, stiffness = 500f)) { -it / 2 }
+    }
+
+    androidx.compose.animation.AnimatedVisibility(
+        visible = usage != null,
+        enter = enter,
+        exit = exit,
+        modifier = modifier.clipToBounds(),
+    ) {
+        displayedUsage?.let { animatedUsage ->
+            ContextMeterButton(
+                usage = animatedUsage,
+                onClick = {
+                    haptics.perform(HapticPattern.Pop)
+                    onClick()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContextMeterButton(
+    usage: ContextUsageBreakdown,
+    onClick: () -> Unit,
+) {
+    val animatedPressure by animateFloatAsState(
+        targetValue = usage.fractionUsed,
+        animationSpec = spring(dampingRatio = 0.78f, stiffness = 240f),
+        label = "context_meter_pressure",
+    )
+    val animatedWindowProgress by animateFloatAsState(
+        targetValue = usage.fractionOfWindowUsed,
+        animationSpec = spring(dampingRatio = 0.78f, stiffness = 240f),
+        label = "context_meter_window_progress",
+    )
+    val animatedReservedProgress by animateFloatAsState(
+        targetValue = usage.fractionOfWindowReserved,
+        animationSpec = spring(dampingRatio = 0.82f, stiffness = 260f),
+        label = "context_meter_reserved_progress",
+    )
+    val targetProgressColor = when {
+        animatedPressure >= 0.95f -> MaterialTheme.colorScheme.error
+        animatedPressure >= 0.82f -> if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) {
+            Color(0xFFFFC857)
+        } else {
+            Color(0xFFB46900)
+        }
+        else -> MaterialTheme.colorScheme.primary
+    }
+    val progressColor by animateColorAsState(
+        targetValue = targetProgressColor,
+        animationSpec = tween(220),
+        label = "context_meter_color",
+    )
+    val containerColor = MaterialTheme.colorScheme.surfaceContainer
+    val shape = AppShapes.ButtonPill
+    Surface(
+        modifier = Modifier
+            .size(AppSize.ChromePill)
+            .lastChatBlurEffect(containerColor, shape)
+            .clickable(onClick = onClick),
+        shape = shape,
+        color = blurredContainerColor(containerColor),
+        border = lastChatSoftEdgeBorder(),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            val trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+            val reserveColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+            Canvas(modifier = Modifier.size(27.dp)) {
+                val strokeWidth = 3.5.dp.toPx()
+                val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                drawArc(
+                    color = trackColor,
+                    startAngle = -90f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    style = stroke,
+                )
+                if (animatedReservedProgress > 0f) {
+                    drawArc(
+                        color = reserveColor,
+                        startAngle = -90f + (1f - animatedReservedProgress) * 360f,
+                        sweepAngle = animatedReservedProgress * 360f,
+                        useCenter = false,
+                        style = stroke,
+                    )
+                }
+                if (animatedWindowProgress > 0f) {
+                    drawArc(
+                        color = progressColor,
+                        startAngle = -90f,
+                        sweepAngle = animatedWindowProgress * 360f,
+                        useCenter = false,
+                        style = stroke,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContextUsagePopupContent(
+    usage: ContextUsageBreakdown,
+    activity: ContextManagementActivity?,
+    model: Model? = null,
+    onUpdateModelLimit: ((Int?) -> Unit)? = null,
+) {
+    val tokenAnimation = spring<Int>(dampingRatio = 0.82f, stiffness = 260f)
+    val animatedUsed by animateIntAsState(usage.usedTokens, tokenAnimation, label = "context_used_tokens")
+    val animatedTotal by animateIntAsState(usage.totalTokens, tokenAnimation, label = "context_total_tokens")
+    val animatedReserved by animateIntAsState(usage.reservedTokens, tokenAnimation, label = "context_reserved")
+    val animatedConversation by animateIntAsState(usage.conversationTokens, tokenAnimation, label = "context_conversation")
+    val animatedSystemPrompt by animateIntAsState(usage.systemPromptTokens, tokenAnimation, label = "context_system_prompt")
+    val animatedSummary by animateIntAsState(usage.summaryTokens, tokenAnimation, label = "context_summary")
+    val animatedMemory by animateIntAsState(usage.memoryTokens, tokenAnimation, label = "context_memory")
+    val animatedSkills by animateIntAsState(usage.skillTokens, tokenAnimation, label = "context_skills")
+    val animatedLorebook by animateIntAsState(usage.lorebookTokens, tokenAnimation, label = "context_lorebook")
+    val animatedToolDefinitions by animateIntAsState(usage.toolDefinitionTokens, tokenAnimation, label = "context_tool_definitions")
+    val animatedToolCalls by animateIntAsState(usage.toolCallTokens, tokenAnimation, label = "context_tool_calls")
+    val animatedMedia by animateIntAsState(usage.mediaTokens, tokenAnimation, label = "context_media")
+    val animatedImages by animateIntAsState(usage.imageCount, tokenAnimation, label = "context_images")
+
+    val haptics = rememberPremiumHaptics()
+    var isEditingLimit by remember { mutableStateOf(false) }
+    val maxCapacityTokens = model?.baseCapacityTokens ?: maxOf(usage.totalTokens, model?.contextCapacityTokens ?: 0)
+    val isCustomLimitActive = model?.customContextLimitTokens != null ||
+        model?.contextLimitSource == me.rerere.ai.provider.ContextLimitSource.MANUAL
+
+    val minSafeFloorTokens = remember(model, usage) {
+        if (model != null) {
+            calculateMinSafeFloorTokens(
+                model = model,
+                systemPromptTokens = usage.systemPromptTokens,
+                toolDefinitionTokens = usage.toolDefinitionTokens,
+            )
+        } else {
+            1_500
+        }
+    }
+    val safeFloor = minSafeFloorTokens.coerceAtMost(maxCapacityTokens)
+
+    val currentLimit = model?.customContextLimitTokens ?: usage.totalTokens
+    var draggedTokens by remember(currentLimit, maxCapacityTokens) {
+        mutableStateOf(currentLimit.coerceIn(safeFloor, maxCapacityTokens))
+    }
+    LaunchedEffect(currentLimit, maxCapacityTokens, isEditingLimit) {
+        if (!isEditingLimit) {
+            draggedTokens = currentLimit.coerceIn(safeFloor, maxCapacityTokens)
+        }
+    }
+
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val categoryColors = if (isDark) {
+        listOf(
+            Color(0xFF8AB4F8), Color(0xFFFF8A80), Color(0xFFFFD166),
+            Color(0xFF7ED99B), Color(0xFFC69AF7), Color(0xFF4DD0E1),
+            Color(0xFFFFA45B), Color(0xFFF48FB1), Color(0xFFB6D957),
+        )
+    } else {
+        listOf(
+            Color(0xFF2457C5), Color(0xFFC43D3D), Color(0xFF9A6500),
+            Color(0xFF187A3B), Color(0xFF7139B6), Color(0xFF087F8C),
+            Color(0xFFB84A00), Color(0xFFA92868), Color(0xFF5F7300),
+        )
+    }
+    val segments = listOf(
+        Triple(stringResource(R.string.context_meter_conversation), animatedConversation, categoryColors[0]),
+        Triple(stringResource(R.string.context_meter_system_prompt), animatedSystemPrompt, categoryColors[1]),
+        Triple(stringResource(R.string.context_meter_summary), animatedSummary, categoryColors[2]),
+        Triple(stringResource(R.string.context_meter_memory), animatedMemory, categoryColors[3]),
+        Triple(stringResource(R.string.context_meter_skills_modes), animatedSkills, categoryColors[4]),
+        Triple(stringResource(R.string.context_meter_lorebook), animatedLorebook, categoryColors[5]),
+        Triple(stringResource(R.string.context_meter_tool_definitions), animatedToolDefinitions, categoryColors[6]),
+        Triple(stringResource(R.string.context_meter_tool_calls), animatedToolCalls, categoryColors[7]),
+        Triple(stringResource(R.string.context_meter_media), animatedMedia, categoryColors[8]),
+    ).filter { it.second > 0 }
+    val reserveColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+
+    val activeBudgetCeiling = if (isEditingLimit) draggedTokens else animatedTotal
+    val liveBudget = if (model != null) {
+        smartInputBudget(model, null, customLimitTokens = activeBudgetCeiling) ?: activeBudgetCeiling
+    } else {
+        activeBudgetCeiling
+    }
+    val liveReserve = (activeBudgetCeiling - liveBudget).coerceAtLeast(0)
+    val effectiveReserved = if (isEditingLimit) liveReserve else (if (animatedReserved > 0) animatedReserved else liveReserve)
+    val animatedEffectiveReserved by animateIntAsState(effectiveReserved, tokenAnimation, label = "context_effective_reserved")
+    val effectiveAvailable = (activeBudgetCeiling - animatedUsed - animatedEffectiveReserved).coerceAtLeast(0)
+    val remainingPercent = if (activeBudgetCeiling <= 0) 100 else
+        ((effectiveAvailable.toFloat() / activeBudgetCeiling) * 100).toInt().coerceIn(0, 100)
+
+    Column(
+        modifier = Modifier.padding(20.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            AnimatedContent(
+                targetState = isEditingLimit,
+                transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(110)) },
+                modifier = Modifier.weight(1f),
+                label = "context_meter_header_text",
+            ) { editing ->
+                if (editing) {
+                    Text(
+                        text = "Target Limit: ${compactTokenCount(draggedTokens)}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    Text(
+                        text = stringResource(
+                            R.string.context_meter_used,
+                            compactTokenCount(animatedUsed),
+                            compactTokenCount(animatedTotal),
+                        ),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+            }
+            AnimatedContent(
+                targetState = isEditingLimit,
+                transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(110)) },
+                label = "context_meter_sub_text",
+            ) { editing ->
+                if (editing) {
+                    Text(
+                        text = "Floor: ${compactTokenCount(safeFloor)}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.context_meter_remaining, remainingPercent),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+        ) {
+            var barWidthPx by remember { mutableFloatStateOf(1f) }
+            val zoomFraction by animateFloatAsState(
+                targetValue = if (isEditingLimit && maxCapacityTokens > 0) {
+                    (draggedTokens.toFloat() / maxCapacityTokens).coerceIn(0.01f, 1f)
+                } else 1f,
+                animationSpec = spring(dampingRatio = 0.78f, stiffness = 240f),
+                label = "context_limit_zoom",
+            )
+
+            val canReset = isCustomLimitActive || (isEditingLimit && draggedTokens != maxCapacityTokens)
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(24.dp)
+                    .onGloballyPositioned { coordinates ->
+                        barWidthPx = coordinates.size.width.toFloat().coerceAtLeast(1f)
+                    }
+                    .then(
+                        if (isEditingLimit) {
+                            Modifier.pointerInput(safeFloor, maxCapacityTokens) {
+                                detectDragGestures(
+                                    onDragStart = { offset ->
+                                        haptics.perform(me.rerere.rikkahub.ui.hooks.HapticPattern.Selection)
+                                        val fraction = (offset.x / barWidthPx).coerceIn(0f, 1f)
+                                        val computed = (fraction * maxCapacityTokens).roundToInt()
+                                        draggedTokens = computed.coerceIn(safeFloor, maxCapacityTokens)
+                                    },
+                                    onDrag = { change, _ ->
+                                        change.consume()
+                                        val fraction = (change.position.x / barWidthPx).coerceIn(0f, 1f)
+                                        val computed = (fraction * maxCapacityTokens).roundToInt()
+                                        val clamped = computed.coerceIn(safeFloor, maxCapacityTokens)
+                                        if (clamped != draggedTokens) {
+                                            haptics.perform(me.rerere.rikkahub.ui.hooks.HapticPattern.Tick)
+                                            draggedTokens = clamped
+                                        }
+                                    },
+                                    onDragEnd = {
+                                        haptics.perform(me.rerere.rikkahub.ui.hooks.HapticPattern.Pop)
+                                    },
+                                )
+                            }
+                        } else Modifier
+                    ),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                // Background Track (18dp height centered in 24dp container)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(18.dp)
+                        .align(Alignment.Center)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                ) {
+                    // Active content segments
+                    Row(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(zoomFraction)
+                            .clip(RoundedCornerShape(999.dp)),
+                    ) {
+                        segments.forEach { (_, value, color) ->
+                            Spacer(
+                                Modifier
+                                    .weight(value.toFloat().coerceAtLeast(1f))
+                                    .fillMaxHeight()
+                                    .background(color),
+                            )
+                        }
+                        if (effectiveAvailable > 0) {
+                            Spacer(Modifier.weight(effectiveAvailable.toFloat()).fillMaxHeight())
+                        }
+                        if (animatedEffectiveReserved > 0) {
+                            Spacer(
+                                Modifier
+                                    .weight(animatedEffectiveReserved.toFloat())
+                                    .fillMaxHeight()
+                                    .background(reserveColor),
+                            )
+                        }
+                    }
+
+                    // Ignored / Darkened Region on the right in Edit Mode
+                    if (isEditingLimit && zoomFraction < 0.999f) {
+                        val ignoredColor = if (isDark) Color(0xFF070709) else Color(0xFF18181E)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(1f - zoomFraction)
+                                .align(Alignment.CenterEnd)
+                                .background(ignoredColor)
+                                .border(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                                    shape = RoundedCornerShape(topEnd = 999.dp, bottomEnd = 999.dp),
+                                ),
+                        )
+                    }
+                }
+
+                // Tactile Draggable thumb indicator (24dp height, 8dp width, centered over the 18dp track)
+                if (isEditingLimit) {
+                    val density = LocalDensity.current
+                    val thumbWidth = 8.dp
+                    val thumbWidthPx = with(density) { thumbWidth.toPx() }
+                    val thumbOffset = ((zoomFraction * barWidthPx) - (thumbWidthPx / 2f))
+                        .coerceIn(0f, (barWidthPx - thumbWidthPx).coerceAtLeast(0f))
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .offset { androidx.compose.ui.unit.IntOffset(thumbOffset.roundToInt(), 0) }
+                            .width(thumbWidth)
+                            .height(24.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(MaterialTheme.colorScheme.primary)
+                            .border(1.5.dp, MaterialTheme.colorScheme.surface, RoundedCornerShape(999.dp)),
+                    )
+                }
+            }
+
+            // The Pencil / Close button sized to 24dp to optically balance against the bar height, with long-press reset
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(
+                        color = when {
+                            isEditingLimit -> MaterialTheme.colorScheme.surfaceContainerHighest
+                            isCustomLimitActive -> MaterialTheme.colorScheme.primaryContainer
+                            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
+                        },
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                    )
+                    .combinedClickable(
+                        onClick = {
+                            haptics.perform(me.rerere.rikkahub.ui.hooks.HapticPattern.Pop)
+                            if (isEditingLimit) {
+                                val newLimit = if (draggedTokens >= maxCapacityTokens) null else draggedTokens
+                                onUpdateModelLimit?.invoke(newLimit)
+                                isEditingLimit = false
+                            } else {
+                                isEditingLimit = true
+                            }
+                        },
+                        onLongClick = if (canReset) {
+                            {
+                                haptics.perform(me.rerere.rikkahub.ui.hooks.HapticPattern.Success)
+                                draggedTokens = maxCapacityTokens
+                                onUpdateModelLimit?.invoke(null)
+                                isEditingLimit = false
+                            }
+                        } else null,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                AnimatedContent(
+                    targetState = isEditingLimit,
+                    transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(110)) },
+                    label = "context_limit_edit_toggle",
+                ) { editing ->
+                    Icon(
+                        imageVector = if (editing) androidx.compose.material.icons.Icons.Rounded.Close else androidx.compose.material.icons.Icons.Rounded.Edit,
+                        contentDescription = if (editing) "Commit" else "Edit context limit",
+                        modifier = Modifier.size(13.dp),
+                        tint = when {
+                            editing -> MaterialTheme.colorScheme.onSurface
+                            isCustomLimitActive -> MaterialTheme.colorScheme.onPrimaryContainer
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
+        }
+        FlowRow(
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
+        ) {
+            segments.forEach { (label, value, color) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).background(color, RoundedCornerShape(999.dp)))
+                    Spacer(Modifier.width(5.dp))
+                    Text("$label ${compactTokenCount(value)}", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            if (animatedEffectiveReserved > 0) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).background(reserveColor, RoundedCornerShape(999.dp)))
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        "${stringResource(R.string.context_meter_reserved)} ${compactTokenCount(animatedEffectiveReserved)}",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            AnimatedContent(
+                targetState = activity,
+                transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(110)) },
+                label = "context_management_activity",
+            ) { currentActivity ->
+                if (currentActivity == ContextManagementActivity.SUMMARIZING) {
+                    Text(
+                        stringResource(R.string.context_meter_summarizing),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    Spacer(Modifier.width(0.dp))
+                }
+            }
+            if (activity != null && usage.maxImages != null) Spacer(Modifier.width(12.dp))
+            usage.maxImages?.let { maxImages ->
+                Text(
+                    stringResource(R.string.context_meter_images, animatedImages, maxImages),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            AnimatedContent(
+                targetState = usage.confidence,
+                transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(110)) },
+                label = "context_confidence",
+            ) { confidence ->
+                Text(
+                    text = stringResource(
+                        when (confidence) {
+                            ContextCountConfidence.EXACT -> R.string.context_meter_exact
+                            ContextCountConfidence.PROVIDER_COUNTED -> R.string.context_meter_provider_counted
+                            ContextCountConfidence.ESTIMATED -> R.string.context_meter_estimated
+                        }
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+private fun compactTokenCount(tokens: Int): String = when {
+    tokens >= 1_000_000 -> "%.1fM".format(tokens / 1_000_000f)
+    tokens >= 1_000 -> "%.1fK".format(tokens / 1_000f)
+    else -> tokens.toString()
 }

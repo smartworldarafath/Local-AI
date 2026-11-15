@@ -128,7 +128,7 @@ fun PresetThemeButtonGroup(
 ) {
     val scrollState = rememberScrollState()
     val selectedThemeId = normalizePresetThemeId(themeId)
-    
+
     val allThemes = remember(customThemes) {
         val list = PresetThemes.toMutableList()
         customThemes.forEach { custom ->
@@ -145,7 +145,7 @@ fun PresetThemeButtonGroup(
         }
         list
     }
-    
+
     Column(
         modifier = modifier.padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -189,7 +189,7 @@ fun PresetThemeButtonGroup(
                                 .background(MaterialTheme.colorScheme.primaryContainer)
                         ) {
                             Icon(
-                                androidx.compose.material.icons.Icons.Rounded.Add,
+                                Icons.Rounded.Add,
                                 contentDescription = "Add Theme",
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer
                             )

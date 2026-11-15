@@ -3,8 +3,8 @@ package me.rerere.rikkahub.di
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
-import at.bitfire.dav4jvm.BasicDigestAuthHandler
-import at.bitfire.dav4jvm.DavCollection
+import at.bitfire.dav4jvm.okhttp.BasicDigestAuthHandler
+import at.bitfire.dav4jvm.okhttp.DavCollection
 import coil3.ImageLoader
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
@@ -12,6 +12,15 @@ import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
 import coil3.svg.SvgDecoder
 import io.ktor.http.HttpHeaders
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.sse.SSE
+import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.serialization.kotlinx.json.json
+import io.ktor.util.StringValues
+import io.modelcontextprotocol.kotlin.sdk.client.SseClientTransport
+import io.modelcontextprotocol.kotlin.sdk.client.StreamableHttpClientTransport
 import io.pebbletemplates.pebble.PebbleEngine
 import me.rerere.ai.provider.ProviderManager
 import me.rerere.common.platform.PlatformFileStore
@@ -32,7 +41,7 @@ import me.rerere.rikkahub.data.ai.transformers.MessageTemplateContextFactory
 import me.rerere.rikkahub.data.ai.transformers.MessageTemplateRenderer
 import me.rerere.rikkahub.data.ai.transformers.PebbleMessageTemplateRenderer
 import me.rerere.rikkahub.data.ai.transformers.TemplateTransformer
-import me.rerere.rikkahub.data.api.SponsorAPI
+
 import me.rerere.rikkahub.data.datastore.SettingsStore
 import me.rerere.rikkahub.data.datastore.QuickSettingsCache
 import me.rerere.rikkahub.data.datastore.SecureStore
@@ -41,17 +50,19 @@ import me.rerere.rikkahub.data.datastore.SpontaneousMessagingStateStore
 import me.rerere.rikkahub.data.db.AppDatabase
 import me.rerere.rikkahub.data.db.Migration_6_7
 import me.rerere.rikkahub.data.ai.mcp.McpManager
+import me.rerere.rikkahub.data.ai.mcp.McpOAuthManager
 import me.rerere.rikkahub.data.ai.mcp.McpServerConfig
 import me.rerere.rikkahub.data.ai.mcp.McpTransportFactory
-import me.rerere.rikkahub.data.ai.mcp.transport.SseClientTransport
-import me.rerere.rikkahub.data.ai.mcp.transport.StreamableHttpClientTransport
 import me.rerere.rikkahub.data.datastore.WebDavConfig
 import me.rerere.rikkahub.data.sync.WebDavClientFactory
 import me.rerere.rikkahub.data.sync.WebdavSync
 import me.rerere.rikkahub.ui.image.AppImageLoaderFactory
+import me.rerere.rikkahub.ui.image.HttpUrlImageInterceptor
+import me.rerere.common.http.normalizeHttpUrl
 import me.rerere.rikkahub.utils.acceptLanguageHeader
 import me.rerere.rikkahub.utils.appLocale
-import androidx.work.WorkManager
+import me.rerere.rikkahub.service.initializeLastChatWorkManager
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -93,7 +104,23 @@ val dataSourceModule = module {
 
     single {
         Room.databaseBuilder(get(), AppDatabase::class.java, "rikka_hub")
-            .addMigrations(Migration_6_7, AppDatabase.MIGRATION_11_12, AppDatabase.MIGRATION_12_13, AppDatabase.MIGRATION_14_16, AppDatabase.MIGRATION_22_23, AppDatabase.MIGRATION_23_24, AppDatabase.MIGRATION_24_25, AppDatabase.MIGRATION_25_26, AppDatabase.MIGRATION_26_27, AppDatabase.MIGRATION_27_28, AppDatabase.MIGRATION_28_29, AppDatabase.MIGRATION_29_30, AppDatabase.MIGRATION_31_32, AppDatabase.MIGRATION_32_33)
+            .addMigrations(
+                Migration_6_7,
+                AppDatabase.MIGRATION_11_12,
+                AppDatabase.MIGRATION_12_13,
+                AppDatabase.MIGRATION_14_16,
+                AppDatabase.MIGRATION_22_23,
+                AppDatabase.MIGRATION_23_24,
+                AppDatabase.MIGRATION_24_25,
+                AppDatabase.MIGRATION_25_26,
+                AppDatabase.MIGRATION_26_27,
+                AppDatabase.MIGRATION_27_28,
+                AppDatabase.MIGRATION_28_29,
+                AppDatabase.MIGRATION_29_30,
+                AppDatabase.MIGRATION_31_32,
+                AppDatabase.MIGRATION_32_33,
+                AppDatabase.MIGRATION_40_39,
+            )
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
                     super.onOpen(db)
@@ -104,7 +131,8 @@ val dataSourceModule = module {
     }
 
     single {
-        WorkManager.getInstance(get())
+        get<android.content.Context>().initializeLastChatWorkManager()
+            ?: error("WorkManager is unavailable on this device")
     }
 
     single {
@@ -172,27 +200,39 @@ val dataSourceModule = module {
     }
 
     single {
+        McpOAuthManager(
+            context = get(),
+            scope = get<me.rerere.rikkahub.AppScope>(),
+            client = get<PlatformHttpClient>(named(MCP_PLATFORM_HTTP_CLIENT)),
+            settingsStore = get(),
+            secretKeyManager = get(),
+        )
+    }
+
+    single {
         McpManager(
             settingsStore = get(),
             appScope = get(),
             transportFactory = get(),
+            oauthManager = get(),
         )
     }
 
     single<McpTransportFactory> {
-        val platformHttpClient = get<PlatformHttpClient>(named(MCP_PLATFORM_HTTP_CLIENT))
+        val httpClient = get<HttpClient>(named(MCP_OKHTTP_CLIENT))
+        val oauthManager = get<McpOAuthManager>()
         McpTransportFactory { config ->
             when (config) {
                 is McpServerConfig.SseTransportServer -> SseClientTransport(
                     urlString = config.url,
-                    client = platformHttpClient,
-                    headers = config.commonOptions.headers,
+                    client = httpClient,
+                    requestBuilder = { appendMcpHeaders(config, oauthManager) },
                 )
 
                 is McpServerConfig.StreamableHTTPServer -> StreamableHttpClientTransport(
                     url = config.url,
-                    client = platformHttpClient,
-                    headers = config.commonOptions.headers.toMap(),
+                    client = httpClient,
+                    requestBuilder = { appendMcpHeaders(config, oauthManager) },
                 )
             }
         }
@@ -208,7 +248,8 @@ val dataSourceModule = module {
             conversationRepo = get(),
             aiLoggingManager = get(),
             embeddingService = get(),
-            memorySearchService = get()
+            memorySearchService = get(),
+            secretKeyManager = get(),
         )
     }
 
@@ -221,6 +262,7 @@ val dataSourceModule = module {
             .followSslRedirects(true)
             .followRedirects(true)
             .retryOnConnectionFailure(true)
+            .fastFallback(true)
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .addHeader(HttpHeaders.AcceptLanguage, acceptLang)
@@ -242,8 +284,25 @@ val dataSourceModule = module {
             .writeTimeout(120.seconds)
             .followSslRedirects(true)
             .followRedirects(true)
+            .retryOnConnectionFailure(true)
+            .fastFallback(true)
             .build()
     }
+
+    single<HttpClient>(named(MCP_OKHTTP_CLIENT)) {
+        val okHttpClient = get<OkHttpClient>(named(MCP_OKHTTP_CLIENT))
+        HttpClient(OkHttp) {
+            engine { preconfigured = okHttpClient }
+            install(ContentNegotiation) {
+                json(kotlinx.serialization.json.Json {
+                    prettyPrint = true
+                    isLenient = true
+                })
+            }
+            install(SSE)
+        }
+    }
+
 
     single<PlatformHttpClient>(named(MCP_PLATFORM_HTTP_CLIENT)) {
         OkHttpPlatformHttpClient(get<OkHttpClient>(named(MCP_OKHTTP_CLIENT)))
@@ -262,7 +321,7 @@ val dataSourceModule = module {
                     if (path != null) {
                         append(path.trim('/'))
                     }
-                }.toHttpUrl()
+                }.toCheckedHttpUrl("WebDAV URL")
                 return DavCollection(
                     httpClient = config.createWebDavClient(),
                     location = location,
@@ -272,7 +331,7 @@ val dataSourceModule = module {
             override fun hrefCollection(config: WebDavConfig, href: String): DavCollection {
                 return DavCollection(
                     httpClient = config.createWebDavClient(),
-                    location = href.toHttpUrl(),
+                    location = href.toCheckedHttpUrl("WebDAV href"),
                 )
             }
 
@@ -286,25 +345,21 @@ val dataSourceModule = module {
                 }
             }
 
-
             private fun WebDavConfig.createWebDavClient(): OkHttpClient {
                 val authHandler = BasicDigestAuthHandler(
                     domain = null,
                     username = username,
-                    password = password,
+                    password = password.toCharArray(),
                 )
                 return OkHttpClient.Builder()
                     .followRedirects(false)
                     .authenticator(authHandler)
                     .addNetworkInterceptor(authHandler)
+                    .fastFallback(true)
                     .writeTimeout(5.minutes)
                     .build()
             }
         }
-    }
-
-    single {
-        SponsorAPI.create(get())
     }
 
     single<PlatformHttpClient> {
@@ -326,7 +381,7 @@ val dataSourceModule = module {
                 .crossfade(true)
                 .memoryCache {
                     MemoryCache.Builder()
-                        .maxSizePercent(context, 0.25)
+                        .maxSizePercent(context, 0.15)
                         .build()
                 }
                 .diskCache {
@@ -336,6 +391,7 @@ val dataSourceModule = module {
                         .build()
                 }
                 .components {
+                    add(HttpUrlImageInterceptor())
                     add(OkHttpNetworkFetcherFactory(callFactory = { okHttpClient }))
                     add(SvgDecoder.Factory(scaleToDensity = true))
                 }
@@ -343,12 +399,67 @@ val dataSourceModule = module {
         }
     }
 
+    // On-device (LiteRT-LM) provider stack
+    single { me.rerere.locallm.LocalModelStore(get()) }
+    single { me.rerere.locallm.LiteRtCatalog(get()) }
+    single { 
+        me.rerere.locallm.ModelInstall(
+            context = get(),
+            huggingFaceTokenProvider = { get<me.rerere.rikkahub.data.datastore.SecretKeyManager>().getHuggingFaceToken() }
+        ) 
+    }
+    single {
+        me.rerere.locallm.LocalDownloadManager(
+            context = get(),
+            install = get(),
+            store = get(),
+            catalog = get(),
+        )
+    }
+    single { me.rerere.locallm.LiteRtRuntime(context = get(), store = get()) }
+    single { me.rerere.locallm.LiteRtEmbedder(context = get()) }
+    single<me.rerere.common.inference.LocalInferenceManager> {
+        me.rerere.rikkahub.data.ai.local.AndroidLocalInferenceManager(
+            liteRtRuntime = get(),
+            embedder = get(),
+            speechRuntime = get(),
+        )
+    }
+    single {
+        me.rerere.locallm.litert.LiteRtProvider(
+            context = get(),
+            runtime = get(),
+            store = get(),
+            embedder = get(),
+            inferenceManager = get(),
+        )
+    }
+
+    // On-device speech recognition (sherpa-onnx) stack
+    single { me.rerere.asr.local.SherpaModelStore(get()) }
+    single { me.rerere.asr.local.SherpaCatalog(get()) }
+    single { me.rerere.asr.local.SherpaModelInstall(get()) }
+    single {
+        me.rerere.asr.local.SherpaDownloadManager(
+            context = get(),
+            install = get(),
+            store = get(),
+        )
+    }
+    single { me.rerere.asr.local.SherpaSttRuntime() }
+
     single {
         ProviderManager(
             platformHttpClient = get(),
             platformMediaEncoder = AndroidPlatformMediaEncoder(),
             platformJwtSigner = AndroidPlatformJwtSigner(),
-        )
+        ).apply {
+            // The on-device provider lives in :local-llm, so register it here (see ProviderManager).
+            registerProvider(
+                me.rerere.locallm.litert.LiteRtProvider.NAME,
+                get<me.rerere.locallm.litert.LiteRtProvider>(),
+            )
+        }
     }
 
     single {
@@ -373,4 +484,26 @@ val dataSourceModule = module {
             webDavClientFactory = get(),
         )
     }
+}
+
+private fun HttpRequestBuilder.appendMcpHeaders(
+    config: McpServerConfig,
+    oauthManager: McpOAuthManager,
+) {
+    headers.appendAll(StringValues.build {
+        val base = config.commonOptions.headers.toMap()
+        val hasManualAuthorization = base.keys.any { it.equals("Authorization", ignoreCase = true) }
+        val resolved = if (hasManualAuthorization) {
+            base
+        } else {
+            base + oauthManager.authorizationHeaders(config.id)
+        }
+        resolved.forEach { (name, value) -> append(name, value) }
+    })
+}
+
+private fun String.toCheckedHttpUrl(label: String): HttpUrl {
+    val normalized = normalizeHttpUrl()
+        ?: throw IllegalArgumentException("$label must be an absolute http or https URL, got: '${trim()}'")
+    return normalized.toHttpUrl()
 }

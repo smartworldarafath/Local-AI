@@ -291,4 +291,3 @@ fun createColorSchemeFromHex(hex: String, dark: Boolean): androidx.compose.mater
         )
     }
 }
-

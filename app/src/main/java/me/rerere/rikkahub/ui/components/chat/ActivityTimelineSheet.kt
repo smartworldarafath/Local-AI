@@ -10,6 +10,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -35,6 +36,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkRemove
@@ -45,6 +47,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Refresh
@@ -61,6 +64,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -72,6 +76,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -248,6 +253,7 @@ internal fun ActivityTimelineSheet(
     modifier: Modifier = Modifier,
     initialOpenRequest: TimelineOpenRequest? = null,
     assistantId: String? = null,
+    isLive: Boolean = false,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     ModalBottomSheet(
@@ -264,6 +270,7 @@ internal fun ActivityTimelineSheet(
                 .padding(bottom = 32.dp),
             initialOpenRequest = initialOpenRequest,
             assistantId = assistantId,
+            isLive = isLive,
             scrollHandoffMode = TimelineScrollHandoffMode.LockedToPanel,
         )
     }
@@ -277,6 +284,7 @@ internal fun ActivityTimelinePanel(
     assistantId: String? = null,
     memoryActions: TimelineMemoryActions? = null,
     scrollHandoffMode: TimelineScrollHandoffMode = TimelineScrollHandoffMode.LockedToPanel,
+    isLive: Boolean = false,
     listState: LazyListState = rememberLazyListState(),
     onTimelineClick: () -> Unit = {},
 ) {
@@ -426,8 +434,15 @@ internal fun ActivityTimelinePanel(
     var deleteTarget by remember { mutableStateOf<MemoryDeleteTarget?>(null) }
     var deletedMemoryIds by remember { mutableStateOf(setOf<Int>()) }
     val context = LocalContext.current
-    val toaster = runCatching { LocalToaster.current }.getOrNull()
+    val toaster = LocalToaster.current
     val entryIds = remember(entries) { entries.map { it.id } }
+    var expandedEntryId by remember(entryIds, initialOpenRequest) {
+        mutableStateOf(
+            buildInitialTimelineFocus(entries, initialOpenRequest)
+                .expandedEntryIds
+                .firstOrNull()
+        )
+    }
     val currentEntryIndex = remember(entries) {
         findCurrentEntryIndex(entries)
     }
@@ -452,6 +467,7 @@ internal fun ActivityTimelinePanel(
     LaunchedEffect(initialOpenRequest) {
         val initialFocus = buildInitialTimelineFocus(entries, initialOpenRequest)
         autoFollowCurrentEntry = initialOpenRequest?.openMode == TimelineOpenMode.FocusCurrent
+        expandedEntryId = initialFocus.expandedEntryIds.firstOrNull()
 
         val scrollIndex = initialFocus.scrollIndex
         if (scrollIndex != null) {
@@ -489,11 +505,14 @@ internal fun ActivityTimelinePanel(
         }
     }
 
+    val useAccordionLayout = !isLive && entries.size > 1
+
     Surface(
         shape = AppShapes.InputField,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         modifier = modifier
             .fillMaxWidth()
+            .clip(AppShapes.InputField)
             .testTag("activity_timeline_panel")
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -507,106 +526,143 @@ internal fun ActivityTimelinePanel(
                 )
             )
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            if (entries.isEmpty()) {
+        if (entries.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
                 Text(
                     text = stringResource(R.string.activity_timeline_empty),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = TIMELINE_MAX_HEIGHT_DP.dp)
-                        .fadeEdges(fadeTop = true, fadeBottom = true)
-                        .testTag("activity_timeline_list")
-                        .nestedScroll(timelineScrollLock),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 10.dp)
-                ) {
-                    itemsIndexed(
-                        items = entries,
-                        key = { index, entry -> "${entry.id}:$index" }
-                    ) { index, entry ->
-                        TimelineEntryItem(
-                            entry = entry,
-                            showDivider = index > 0,
-                            isLocallyDeleted = entry is TimelineEntry.MemoryAction &&
-                                entry.memoryId != null &&
-                                deletedMemoryIds.contains(entry.memoryId),
-                            onEditMemory = { id, content ->
+            }
+        } else {
+            val canScrollBackward by remember { derivedStateOf { listState.canScrollBackward } }
+            val canScrollForward by remember { derivedStateOf { listState.canScrollForward } }
+            val topFadeProgress by animateFloatAsState(
+                targetValue = if (canScrollBackward) 1f else 0f,
+                animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing),
+                label = "timeline_top_fade"
+            )
+            val bottomFadeProgress by animateFloatAsState(
+                targetValue = if (canScrollForward) 1f else 0f,
+                animationSpec = tween(durationMillis = 180, easing = LinearOutSlowInEasing),
+                label = "timeline_bottom_fade"
+            )
+
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = TIMELINE_MAX_HEIGHT_DP.dp)
+                    .clip(AppShapes.InputField)
+                    .fadeEdges(
+                        topProgress = topFadeProgress,
+                        bottomProgress = bottomFadeProgress,
+                        fadeHeight = 72f
+                    )
+                    .testTag("activity_timeline_list")
+                    .nestedScroll(timelineScrollLock),
+                verticalArrangement = Arrangement.spacedBy(if (useAccordionLayout) 3.dp else 8.dp),
+                contentPadding = if (useAccordionLayout) {
+                    androidx.compose.foundation.layout.PaddingValues(4.dp)
+                } else {
+                    androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 12.dp)
+                }
+            ) {
+                itemsIndexed(
+                    items = entries,
+                    key = { index, entry -> "${entry.id}:$index" }
+                ) { index, entry ->
+                    // Optically nested inside the outer panel (InputField = 24dp) with
+                    // 4dp list padding: outer-facing corners step down to 20dp (24 - 4),
+                    // sibling-facing joints stay small at 6dp across the 3dp gaps.
+                    val shape = when {
+                        entries.size == 1 -> RoundedCornerShape(20.dp)
+                        index == 0 -> RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 6.dp)
+                        index == entries.lastIndex -> RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 20.dp, bottomEnd = 20.dp)
+                        else -> RoundedCornerShape(6.dp)
+                    }
+                    TimelineEntryItem(
+                        entry = entry,
+                        showDivider = index > 0,
+                        useAccordionLayout = useAccordionLayout,
+                        expanded = expandedEntryId == entry.id,
+                        isLocallyDeleted = entry is TimelineEntry.MemoryAction &&
+                            entry.memoryId != null &&
+                            deletedMemoryIds.contains(entry.memoryId),
+                        onEditMemory = { id, content ->
+                            haptics.perform(HapticPattern.Pop)
+                            editTarget = MemoryEditTarget(id, content)
+                        },
+                        onDeleteMemory = { id, content ->
+                            haptics.perform(HapticPattern.Thud)
+                            deleteTarget = MemoryDeleteTarget(id, content)
+                        },
+                        onRestoreMemory = { content ->
+                            haptics.perform(HapticPattern.Success)
+                            scope.launch {
+                                resolvedMemoryActions.restoreMemory(content)
+                            }
+                        },
+                        onRevertMemory = { id, content ->
+                            haptics.perform(HapticPattern.Pop)
+                            scope.launch {
+                                resolvedMemoryActions.revertMemory(id, content)
+                            }
+                        },
+                        canRestore = assistantId != null,
+                        followLiveContent = isLive &&
+                            autoFollowCurrentEntry &&
+                            currentEntryId != null &&
+                            currentEntryId == entry.id,
+                        onClickEntry = onTimelineClick,
+                        onToggleExpanded = {
+                            haptics.perform(HapticPattern.Pop)
+                            expandedEntryId = if (expandedEntryId == entry.id) null else entry.id
+                        },
+                        onCopyEntry = {
+                            val text = buildTimelineCopyText(entry)
+                            if (text.isBlank()) {
                                 haptics.perform(HapticPattern.Pop)
-                                editTarget = MemoryEditTarget(id, content)
-                            },
-                            onDeleteMemory = { id, content ->
-                                haptics.perform(HapticPattern.Thud)
-                                deleteTarget = MemoryDeleteTarget(id, content)
-                            },
-                            onRestoreMemory = { content ->
+                                val message = context.getString(R.string.no_text_content_to_copy)
+                                toaster.show(message)
+                            } else {
+                                context.writeClipboardText(text)
                                 haptics.perform(HapticPattern.Success)
-                                scope.launch {
-                                    resolvedMemoryActions.restoreMemory(content)
-                                }
-                            },
-                            onRevertMemory = { id, content ->
-                                haptics.perform(HapticPattern.Pop)
-                                scope.launch {
-                                    resolvedMemoryActions.revertMemory(id, content)
-                                }
-                            },
-                            canRestore = assistantId != null,
-                            followLiveContent = autoFollowCurrentEntry &&
-                                currentEntryId != null &&
-                                currentEntryId == entry.id,
-                            onClickEntry = onTimelineClick,
-                            onCopyEntry = {
-                                val text = buildTimelineCopyText(entry)
-                                if (text.isBlank()) {
-                                    haptics.perform(HapticPattern.Pop)
-                                    val message = context.getString(R.string.no_text_content_to_copy)
-                                    toaster?.show(message)
-                                        ?: Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-                                } else {
-                                    context.writeClipboardText(text)
-                                    haptics.perform(HapticPattern.Success)
-                                    val message = context.getString(R.string.chat_page_export_copied)
-                                    toaster?.show(message = message, type = ToastType.Success)
-                                        ?: Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
-                                }
+                                val message = context.getString(R.string.chat_page_export_copied)
+                                toaster.show(message = message, type = ToastType.Success)
                             }
-                        )
-                    }
-                    if (entries.size > 1) {
-                        item(key = "footer") {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 16.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = pluralStringResource(R.plurals.activity_timeline_steps, entries.size, entries.size),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                    item(key = TIMELINE_FOLLOW_BOTTOM_KEY) {
-                        Spacer(
+                        },
+                        shape = shape
+                    )
+                }
+                if (entries.size > 1) {
+                    item(key = "footer") {
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(1.dp)
-                                .bringIntoViewRequester(bottomFollowRequester)
-                        )
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = pluralStringResource(R.plurals.activity_timeline_steps, entries.size, entries.size),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
+                }
+                item(key = TIMELINE_FOLLOW_BOTTOM_KEY) {
+                    Spacer(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .bringIntoViewRequester(bottomFollowRequester)
+                    )
                 }
             }
         }
@@ -689,6 +745,8 @@ internal fun ActivityTimelinePanel(
 private fun TimelineEntryItem(
     entry: TimelineEntry,
     showDivider: Boolean,
+    useAccordionLayout: Boolean,
+    expanded: Boolean,
     isLocallyDeleted: Boolean,
     onEditMemory: (Int, String) -> Unit,
     onDeleteMemory: (Int, String?) -> Unit,
@@ -697,7 +755,9 @@ private fun TimelineEntryItem(
     canRestore: Boolean,
     followLiveContent: Boolean,
     onClickEntry: () -> Unit,
+    onToggleExpanded: () -> Unit,
     onCopyEntry: () -> Unit,
+    shape: Shape = AppShapes.ListItem,
     modifier: Modifier = Modifier
 ) {
     val hasContent = when (entry) {
@@ -722,6 +782,26 @@ private fun TimelineEntryItem(
     val followSignature = remember(entry) { buildEntryFollowSignature(entry) }
     val isSingleEntry = !showDivider
 
+    if (useAccordionLayout) {
+        TimelineAccordionEntry(
+            entry = entry,
+            expanded = expanded,
+            hasContent = hasContent,
+            accentColor = accentColor,
+            isMemoryDeleted = isMemoryDeleted,
+            onEditMemory = onEditMemory,
+            onDeleteMemory = onDeleteMemory,
+            onRestoreMemory = onRestoreMemory,
+            onRevertMemory = onRevertMemory,
+            canRestore = canRestore,
+            onToggleExpanded = onToggleExpanded,
+            onCopyEntry = onCopyEntry,
+            shape = shape,
+            modifier = modifier.testTag("timeline_entry_${entry.id}"),
+        )
+        return
+    }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -738,7 +818,32 @@ private fun TimelineEntryItem(
             formatTimelineDuration(entry.durationMs)?.let { " · $it" } ?: ""
         } else ""
 
-        if (!isSingleEntry) {
+        if (isSingleEntry) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onClickEntry
+                    ),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = getTimelineIcon(entry),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = accentColor
+                )
+                Text(
+                    text = getTimelineLabel(entry) + durationLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        } else {
             TimelineDivider(
                 label = getTimelineLabel(entry) + durationLabel,
                 icon = getTimelineIcon(entry),
@@ -751,7 +856,7 @@ private fun TimelineEntryItem(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
+                    .padding(horizontal = if (isSingleEntry) 0.dp else 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 TimelineExpandedContent(
@@ -779,6 +884,151 @@ private fun TimelineEntryItem(
                 viewRequester.bringIntoView()
             } catch (_: IllegalStateException) {
                 // The row may be leaving composition while live content is still updating.
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TimelineAccordionEntry(
+    entry: TimelineEntry,
+    expanded: Boolean,
+    hasContent: Boolean,
+    accentColor: Color,
+    isMemoryDeleted: Boolean,
+    onEditMemory: (Int, String) -> Unit,
+    onDeleteMemory: (Int, String?) -> Unit,
+    onRestoreMemory: (String) -> Unit,
+    onRevertMemory: (Int, String) -> Unit,
+    canRestore: Boolean,
+    onToggleExpanded: () -> Unit,
+    onCopyEntry: () -> Unit,
+    shape: Shape = AppShapes.ListItem,
+    modifier: Modifier = Modifier,
+) {
+    val durationLabel = if (entry is TimelineEntry.Reasoning) {
+        formatTimelineDuration(entry.durationMs)?.let { " · $it" }.orEmpty()
+    } else {
+        ""
+    }
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = 300f),
+        label = "timeline_section_chevron",
+    )
+
+    Surface(
+        shape = shape,
+        color = if (expanded) {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        } else {
+            MaterialTheme.colorScheme.surfaceContainer
+        },
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .animateContentSize(
+                animationSpec = tween(
+                    durationMillis = TIMELINE_PANEL_ANIMATION_MS,
+                    easing = LinearOutSlowInEasing,
+                )
+            )
+            .combinedClickable(
+                onClick = onToggleExpanded,
+                onLongClick = onCopyEntry,
+            ),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(accentColor.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = getTimelineIcon(entry),
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = accentColor,
+                    )
+                }
+                Text(
+                    text = getTimelineLabel(entry) + durationLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                val inspectedImageCount = (entry as? TimelineEntry.ToolCall)
+                    ?.let { (it.resultJson as? JsonObject)?.get("inspected_images") as? JsonArray }
+                    ?.size ?: 0
+                if (inspectedImageCount > 0) {
+                    Surface(
+                        shape = AppShapes.Chip,
+                        color = accentColor.copy(alpha = 0.14f),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Image,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp),
+                                tint = accentColor,
+                            )
+                            if (inspectedImageCount > 1) {
+                                Text(
+                                    text = inspectedImageCount.toString(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = accentColor,
+                                )
+                            }
+                        }
+                    }
+                }
+                if (hasContent) {
+                    Icon(
+                        imageVector = Icons.Rounded.ExpandMore,
+                        contentDescription = stringResource(
+                            if (expanded) R.string.activity_timeline_collapse
+                            else R.string.activity_timeline_expand
+                        ),
+                        modifier = Modifier
+                            .size(20.dp)
+                            .graphicsLayer { rotationZ = chevronRotation },
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (expanded && hasContent) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 14.dp, end = 14.dp, bottom = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TimelineExpandedContent(
+                        entry = entry,
+                        isDeleted = isMemoryDeleted,
+                        onEditMemory = onEditMemory,
+                        onDeleteMemory = onDeleteMemory,
+                        onRestoreMemory = onRestoreMemory,
+                        onRevertMemory = onRevertMemory,
+                        canRestore = canRestore,
+                        followLiveContent = false,
+                    )
+                }
             }
         }
     }
@@ -1009,7 +1259,7 @@ private fun MemoryRecallTimelineDetails(entry: TimelineEntry.ToolCall) {
 
         if (!summary.isNullOrBlank()) {
             Surface(
-                shape = AppShapes.CardSmall,
+                shape = AppShapes.CardSmallInner8,
                 color = MaterialTheme.colorScheme.secondaryContainer,
             ) {
                 Text(
@@ -1038,7 +1288,7 @@ private fun MemoryRecallTimelineDetails(entry: TimelineEntry.ToolCall) {
                     val matchedText = obj["matched_text"]?.jsonPrimitiveOrNull?.contentOrNull
 
                     Surface(
-                        shape = AppShapes.CardSmall,
+                        shape = AppShapes.CardSmallInner8,
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     ) {
                         Column(
@@ -1274,6 +1524,40 @@ private fun SearchTimelineCompactDetails(entry: TimelineEntry.ToolCall) {
                 }
             }
         }
+        val inspectedImages = (resultObj?.get("inspected_images") as? JsonArray)
+            ?.mapNotNull { item ->
+                val obj = item as? JsonObject ?: return@mapNotNull null
+                val title = obj["title"]?.jsonPrimitiveOrNull?.contentOrNull?.takeIf { it.isNotBlank() }
+                val sourceUrl = obj["source_url"]?.jsonPrimitiveOrNull?.contentOrNull?.takeIf { it.isNotBlank() }
+                val label = title ?: sourceUrl?.let { runCatching { Uri.parse(it).host }.getOrNull() } ?: "Image"
+                label to sourceUrl
+            }.orEmpty()
+        if (inspectedImages.isNotEmpty()) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                inspectedImages.forEach { (label, sourceUrl) ->
+                    TimelineTagChip(
+                        text = if (label.length > 28) label.take(26) + "…" else label,
+                        leadingIcon = Icons.Rounded.Image,
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = if (sourceUrl != null) {
+                            Modifier.combinedClickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = {
+                                    runCatching {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(sourceUrl)))
+                                    }
+                                }
+                            )
+                        } else Modifier
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1449,6 +1733,19 @@ private fun WorkspaceTimelineCompactDetails(entry: TimelineEntry.ToolCall) {
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            val inspectedImages = ((entry.resultJson as? JsonObject)?.get("inspected_images") as? JsonArray).orEmpty()
+            inspectedImages.forEach { item ->
+                val obj = item as? JsonObject
+                val title = obj?.get("title")?.jsonPrimitiveOrNull?.contentOrNull
+                    ?: obj?.get("source_url")?.jsonPrimitiveOrNull?.contentOrNull?.substringAfterLast('/')
+                    ?: "Image"
+                TimelineTagChip(
+                    text = title,
+                    leadingIcon = Icons.Rounded.Image,
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+            }
         }
         (summary.error ?: summary.stderr ?: summary.stdout ?: summary.text)?.takeIf { it.isNotBlank() }?.let {
             Text(
@@ -1529,7 +1826,7 @@ private fun SearchTimelineDetails(entry: TimelineEntry.ToolCall) {
 
     if (!answer.isNullOrBlank()) {
         Surface(
-            shape = AppShapes.CardSmall,
+            shape = AppShapes.CardSmallInner8,
             color = MaterialTheme.colorScheme.tertiaryContainer
         ) {
             Text(
@@ -1556,7 +1853,7 @@ private fun SearchTimelineDetails(entry: TimelineEntry.ToolCall) {
                 val host = url?.let { Uri.parse(it).host }
 
                 Surface(
-                    shape = AppShapes.CardSmall,
+                    shape = AppShapes.CardSmallInner8,
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 ) {
                     Column(
@@ -1613,7 +1910,7 @@ private fun ScrapeTimelineDetails(entry: TimelineEntry.ToolCall) {
 
     if (!content.isNullOrBlank()) {
         Surface(
-            shape = AppShapes.CardSmall,
+            shape = AppShapes.CardSmallInner8,
             color = MaterialTheme.colorScheme.surfaceContainerHigh
         ) {
             Text(
@@ -1705,7 +2002,7 @@ private fun AskUserQuestionTimelineCard(
         question.options.none { option -> option.label == answerValue })
 
     Surface(
-        shape = AppShapes.CardSmall,
+        shape = AppShapes.CardSmallInner8,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -1730,7 +2027,9 @@ private fun AskUserQuestionTimelineCard(
                     question.options.forEach { option ->
                         val isSelected = selectedOption == option.label
                         Surface(
-                            shape = AppShapes.CardSmall,
+                            // Nested inside the 8dp question card with 10dp padding:
+                            // step down to 6dp so corners read as optically nested.
+                            shape = RoundedCornerShape(6.dp),
                             color = if (isSelected) {
                                 MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                             } else {
@@ -1833,7 +2132,7 @@ private fun PythonTimelineDetails(entry: TimelineEntry.ToolCall) {
         !summary.stderr.isNullOrBlank()
 
     Surface(
-        shape = AppShapes.CardSmall,
+        shape = AppShapes.CardSmallInner8,
         color = if (!summary.error.isNullOrBlank()) {
             MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
         } else {
@@ -2104,7 +2403,7 @@ private fun SkillManagementTimelineDetails(entry: TimelineEntry.ToolCall) {
             color = MaterialTheme.colorScheme.secondary
         )
         Surface(
-            shape = AppShapes.CardSmall,
+            shape = AppShapes.CardSmallInner8,
             color = MaterialTheme.colorScheme.tertiaryContainer
         ) {
             Text(
@@ -2123,7 +2422,7 @@ private fun SkillManagementTimelineDetails(entry: TimelineEntry.ToolCall) {
             color = MaterialTheme.colorScheme.secondary
         )
         Surface(
-            shape = AppShapes.CardSmall,
+            shape = AppShapes.CardSmallInner8,
             color = MaterialTheme.colorScheme.surfaceContainerHigh
         ) {
             Text(
@@ -2158,7 +2457,7 @@ private fun GenericToolDetails(entry: TimelineEntry.ToolCall) {
             color = MaterialTheme.colorScheme.secondary
         )
         Surface(
-            shape = AppShapes.CardSmall,
+            shape = AppShapes.CardSmallInner8,
             color = MaterialTheme.colorScheme.surfaceContainerHigh
         ) {
             Text(
@@ -2177,7 +2476,7 @@ private fun GenericToolDetails(entry: TimelineEntry.ToolCall) {
             color = MaterialTheme.colorScheme.secondary
         )
         Surface(
-            shape = AppShapes.CardSmall,
+            shape = AppShapes.CardSmallInner8,
             color = MaterialTheme.colorScheme.surfaceContainerHigh
         ) {
             Text(
@@ -2202,7 +2501,7 @@ private fun TimelineDetailBlock(
         color = MaterialTheme.colorScheme.secondary
     )
     Surface(
-        shape = AppShapes.CardSmall,
+        shape = AppShapes.CardSmallInner8,
         color = containerColor,
         modifier = Modifier.fillMaxWidth()
     ) {
@@ -2218,18 +2517,32 @@ private fun TimelineTagChip(
     containerColor: Color,
     contentColor: Color,
     modifier: Modifier = Modifier,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
 ) {
     Surface(
         shape = AppShapes.Chip,
         color = containerColor,
         modifier = modifier
     ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = contentColor,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-        )
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (leadingIcon != null) {
+                Icon(
+                    imageVector = leadingIcon,
+                    contentDescription = null,
+                    modifier = Modifier.size(12.dp),
+                    tint = contentColor,
+                )
+            }
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall,
+                color = contentColor,
+            )
+        }
     }
 }
 
@@ -2414,7 +2727,7 @@ private fun MemoryContentBlock(
         color = MaterialTheme.colorScheme.secondary
     )
     Surface(
-        shape = AppShapes.CardSmall,
+        shape = AppShapes.CardSmallInner8,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth()
     ) {
